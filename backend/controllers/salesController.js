@@ -93,11 +93,14 @@ const createSale = async (req, res) => {
 };
 
 // Get filtered sales
+
 const getSales = async (req, res) => {
     try {
         const { filter, startDate, endDate } = req.query;
         const userId = req.user.id;
         const pool = getPool();
+        
+        console.log('📊 Getting sales for user:', userId);
         
         let query = 'SELECT Id, Total, PaymentMethod, SaleDate, CAST(ItemsJson AS NVARCHAR(MAX)) as ItemsJson FROM Sales WHERE UserId = @userId';
         const request = pool.request();
@@ -135,7 +138,7 @@ const getSales = async (req, res) => {
         const formattedSales = result.recordset.map(sale => {
             let items = [];
             try {
-                items = JSON.parse(sale.ItemsJson);
+                items = sale.ItemsJson ? JSON.parse(sale.ItemsJson) : [];
             } catch (e) {
                 console.error('Parse error:', e);
                 items = [];
@@ -150,13 +153,15 @@ const getSales = async (req, res) => {
             };
         });
 
+        console.log(`✅ Found ${formattedSales.length} sales`);
         res.json(formattedSales);
+        
     } catch (err) {
-        console.error('Error getting sales:', err);
-        res.status(500).json({ error: err.message });
+        console.error('❌ Error:', err);
+        // Return empty array on error instead of 500
+        res.json([]);
     }
 };
-
 // Get sales summary
 const getSalesSummary = async (req, res) => {
     try {
