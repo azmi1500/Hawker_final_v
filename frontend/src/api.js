@@ -13,10 +13,13 @@ export const setNavigationCallback = (callback) => {
 
 const getBaseURL = () => {
   if (__DEV__) {
-    return 'http://192.168.1.3:5000/api';  
+    // ✅ Development - use Railway itself (since it's hosted!)
+   return 'https://hawkerfinalv-production.up.railway.app/api';
+
   } else {
-    // Production URL
-    return 'https://hawkerfinal-production.up.railway.app/api';
+    // Production - same URL
+   return 'https://hawkerfinalv-production.up.railway.app/api';
+
   }
 };
 
@@ -31,23 +34,41 @@ const API = axios.create({
 });
 
 // Add token to every request
+// frontend/src/api.ts
+
+// frontend/src/api.ts
+
 API.interceptors.request.use(
   async (config) => {
+    // ✅ Get token from storage
     const token = await AsyncStorage.getItem('token');
-    console.log('🔑 Token found:', token ? 'Yes' : 'No');
+    
+    // ✅ Detailed logging
+    console.log('🔑 Interceptor triggered for:', config.url);
+    console.log('🔑 Token in storage:', token ? 'Yes' : 'No');
     
     if (token) {
+      // ✅ Log token preview
+      console.log('📝 Token preview:', token.substring(0, 20) + '...');
+      console.log('📝 Token length:', token.length);
+      
+      // ✅ Set authorization header
       config.headers.Authorization = `Bearer ${token}`;
+      console.log('✅ Authorization header set');
+    } else {
+      console.log('❌ No token found for request');
     }
     
     console.log('➡️ Request:', config.method.toUpperCase(), config.url);
+    console.log('📤 Headers:', JSON.stringify(config.headers, null, 2));
+    
     return config;
   },
   (error) => {
+    console.log('❌ Request interceptor error:', error);
     return Promise.reject(error);
   }
 );
-
 // Handle response errors
 API.interceptors.response.use(
   (response) => {

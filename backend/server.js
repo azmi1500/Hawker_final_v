@@ -8,6 +8,11 @@ const path = require('path');
 const { connectDB } = require('./config/db');
 const { authenticateToken } = require('./middleware/auth');
 const startLicenseUpdater = require('./cron/licenseUpdater');
+app.use((req, res, next) => {
+    // ✅ Ensure headers are preserved
+    console.log('📨 Incoming headers:', req.headers);
+    next();
+});
 // Import routes
 const authRoutes = require('./routes/authRoutes');
 const dishGroupRoutes = require('./routes/dishGroupRoutes');
