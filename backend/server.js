@@ -244,6 +244,27 @@ app.put('/api/user/update-paynow', authenticateToken, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+app.get('/', (req, res) => {
+    res.json({ 
+        message: 'POS Backend is running!',
+        api: 'https://hawkerfinalv-production.up.railway.app/api',
+        status: 'healthy'
+    });
+});
+
+app.get('/api', (req, res) => {
+    res.json({ 
+        message: 'POS API is running!',
+        endpoints: {
+            test: '/api/test',
+            auth: '/api/auth/login',
+            dishgroups: '/api/dishgroups',
+            dishitems: '/api/dishitems',
+            sales: '/api/sales'
+        },
+        time: new Date().toISOString()
+    });
+});
 // Test route
 app.get('/api/test', (req, res) => {
     res.json({ 
