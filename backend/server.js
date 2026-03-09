@@ -8,28 +8,26 @@ const path = require('path');
 const { connectDB } = require('./config/db');
 const { authenticateToken } = require('./middleware/auth');
 const startLicenseUpdater = require('./cron/licenseUpdater');
-app.use((req, res, next) => {
-    // ✅ Ensure headers are preserved
-    console.log('📨 Incoming headers:', req.headers);
-    next();
-});
+
 // Import routes
 const authRoutes = require('./routes/authRoutes');
 const dishGroupRoutes = require('./routes/dishGroupRoutes');
 const dishItemRoutes = require('./routes/dishItemRoutes');
 const salesRoutes = require('./routes/salesRoutes');
-const startLicenseChecker = require('./utils/licenseCron');
 const adminRoutes = require('./routes/adminRoutes');
 const companySettingsRoutes = require('./routes/companySettingsRoutes');  
-const userRoutes = require('./routes/userRoutes');
 const paynowRoutes = require('./routes/paynowRoutes');
 
-const app = express();
+const app = express();  // ✅ ONLY ONE app declaration!
 const PORT = process.env.PORT || 5000;
+
+// Create uploads directory
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
+
+// Multer configuration
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir);
@@ -54,6 +52,7 @@ const upload = multer({
     cb(new Error('Only images are allowed'));
   }
 });
+
 // Middleware
 app.use(cors({
     origin: '*',
@@ -67,16 +66,21 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Log all requests
 app.use((req, res, next) => {
+    console.log('📨 Incoming headers:', req.headers);
     console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
-    console.log('Headers:', req.headers['content-type']);
-    if (req.method === 'POST' || req.method === 'PUT') {
-        console.log('Body:', req.body);
-    }
     next();
 });
-// backend/server.js - Add this AFTER your middleware but BEFORE your routes
 
-// ✅ FIX: Add root API route
+// ✅ ROOT ROUTES - These must come BEFORE other routes
+app.get('/', (req, res) => {
+    res.json({ 
+        message: 'POS Backend is running!',
+        api: 'https://hawkerfinalv-production.up.railway.app/api',
+        status: 'healthy',
+        time: new Date().toISOString()
+    });
+});
+
 app.get('/api', (req, res) => {
     res.json({ 
         message: 'POS API is running!',
@@ -93,29 +97,33 @@ app.get('/api', (req, res) => {
     });
 });
 
-// ✅ Also add root route for base URL
-app.get('/', (req, res) => {
+// Test route
+app.get('/api/test', (req, res) => {
     res.json({ 
-        message: 'POS Backend is running!',
-        api: 'https://hawkerfinalv-production.up.railway.app/api',
-        status: 'healthy',
-        database: 'Connected to AWS RDS',
-        time: new Date().toISOString()
+        message: 'Server is working!',
+        time: new Date().toISOString(),
+        routes: {
+            auth: '/api/auth/login',
+            dishgroups: '/api/dishgroups',
+            dishitems: '/api/dishitems',
+            sales: '/api/sales'
+        }
     });
 });
+
 // ✅ PUBLIC ROUTES - NO AUTH REQUIRED
 app.use('/api/auth', authRoutes);
 
+// ✅ PROTECTED ROUTES - AUTH REQUIRED
 app.use('/api/admin', authenticateToken, adminRoutes);
 app.use('/api/license', authenticateToken, adminRoutes);
-app.use('/api/license', authenticateToken, require('./routes/adminRoutes'));
-// ✅ PROTECTED ROUTES - AUTH REQUIRED
 app.use('/api/dishgroups', authenticateToken, dishGroupRoutes);
 app.use('/api/dishitems', authenticateToken, dishItemRoutes);
 app.use('/api/sales', authenticateToken, salesRoutes);
 app.use('/api/company-settings', authenticateToken, companySettingsRoutes); 
- 
 app.use('/api/user', authenticateToken, paynowRoutes);
+
+// UPI routes
 app.get('/api/user/upi/:userId', authenticateToken, async (req, res) => {
     try {
         const { userId } = req.params;
@@ -133,9 +141,8 @@ app.get('/api/user/upi/:userId', authenticateToken, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-// server.js - Add these endpoints
 
-// Get user payment modes
+// Payment modes
 app.get('/api/user/payment-modes/:userId', authenticateToken, async (req, res) => {
     try {
         const { userId } = req.params;
@@ -156,13 +163,11 @@ app.get('/api/user/payment-modes/:userId', authenticateToken, async (req, res) =
     }
 });
 
-// UPDATE user payment modes
 app.put('/api/user/payment-modes', authenticateToken, async (req, res) => {
     try {
         const { userId, paymentModes } = req.body;
         const pool = await connectDB();
         
-        // Check if user preference exists
         const exists = await pool.request()
             .input('userId', userId)
             .query('SELECT id FROM user_preferences WHERE user_id = @userId');
@@ -170,14 +175,12 @@ app.put('/api/user/payment-modes', authenticateToken, async (req, res) => {
         const modesJson = JSON.stringify(paymentModes);
         
         if (exists.recordset.length > 0) {
-            // Update
             await pool.request()
                 .input('userId', userId)
                 .input('paymentModes', modesJson)
                 .input('updatedAt', new Date())
                 .query('UPDATE user_preferences SET payment_modes = @paymentModes, updated_at = @updatedAt WHERE user_id = @userId');
         } else {
-            // Insert
             await pool.request()
                 .input('userId', userId)
                 .input('paymentModes', modesJson)
@@ -190,6 +193,8 @@ app.put('/api/user/payment-modes', authenticateToken, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// Update UPI
 app.put('/api/user/update-upi', authenticateToken, async (req, res) => {
     try {
         const { userId, upiId } = req.body;
@@ -211,9 +216,7 @@ app.put('/api/user/update-upi', authenticateToken, async (req, res) => {
     }
 });
 
-// ✅ ADD THESE PAYNOW ROUTES HERE 👇
-
-// GET PayNow QR code for user
+// PayNow routes
 app.get('/api/user/paynow/:userId', authenticateToken, async (req, res) => {
     try {
         const { userId } = req.params;
@@ -231,27 +234,7 @@ app.get('/api/user/paynow/:userId', authenticateToken, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-app.post('/api/upload', authenticateToken, upload.single('image'), (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
-    
-    const imageUrl = `/uploads/${req.file.filename}`;
-    console.log('✅ File uploaded:', req.file.filename);
-    
-    res.json({ 
-      success: true, 
-      imageUrl,
-      message: 'File uploaded successfully' 
-    });
-    
-  } catch (error) {
-    console.error('❌ Upload error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-// UPDATE PayNow QR code
+
 app.put('/api/user/update-paynow', authenticateToken, async (req, res) => {
     try {
         const { userId, qrCodeUrl } = req.body;
@@ -273,20 +256,26 @@ app.put('/api/user/update-paynow', authenticateToken, async (req, res) => {
     }
 });
 
-
-
-// Test route
-app.get('/api/test', (req, res) => {
+// File upload
+app.post('/api/upload', authenticateToken, upload.single('image'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    
+    const imageUrl = `/uploads/${req.file.filename}`;
+    console.log('✅ File uploaded:', req.file.filename);
+    
     res.json({ 
-        message: 'Server is working!',
-        time: new Date().toISOString(),
-        routes: {
-            auth: '/api/auth/login',
-            dishgroups: '/api/dishgroups',
-            dishitems: '/api/dishitems',
-            sales: '/api/sales'
-        }
+      success: true, 
+      imageUrl,
+      message: 'File uploaded successfully' 
     });
+    
+  } catch (error) {
+    console.error('❌ Upload error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Error handling
@@ -297,7 +286,7 @@ app.use((err, req, res, next) => {
 
 // Start server
 connectDB().then(() => {
-      startLicenseUpdater(); 
+    startLicenseUpdater(); 
     app.listen(PORT, '0.0.0.0', () => {
         console.log(`✅ Server running on port ${PORT}`);
         console.log(`📍 Local: http://localhost:${PORT}`);
