@@ -74,7 +74,35 @@ app.use((req, res, next) => {
     }
     next();
 });
+// backend/server.js - Add this AFTER your middleware but BEFORE your routes
 
+// ✅ FIX: Add root API route
+app.get('/api', (req, res) => {
+    res.json({ 
+        message: 'POS API is running!',
+        endpoints: {
+            test: '/api/test',
+            auth: '/api/auth/login',
+            dishgroups: '/api/dishgroups',
+            dishitems: '/api/dishitems',
+            sales: '/api/sales',
+            'company-settings': '/api/company-settings/:userId',
+            license: '/api/license/status'
+        },
+        time: new Date().toISOString()
+    });
+});
+
+// ✅ Also add root route for base URL
+app.get('/', (req, res) => {
+    res.json({ 
+        message: 'POS Backend is running!',
+        api: 'https://hawkerfinalv-production.up.railway.app/api',
+        status: 'healthy',
+        database: 'Connected to AWS RDS',
+        time: new Date().toISOString()
+    });
+});
 // ✅ PUBLIC ROUTES - NO AUTH REQUIRED
 app.use('/api/auth', authRoutes);
 
@@ -244,27 +272,9 @@ app.put('/api/user/update-paynow', authenticateToken, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-app.get('/', (req, res) => {
-    res.json({ 
-        message: 'POS Backend is running!',
-        api: 'https://hawkerfinalv-production.up.railway.app/api',
-        status: 'healthy'
-    });
-});
 
-app.get('/api', (req, res) => {
-    res.json({ 
-        message: 'POS API is running!',
-        endpoints: {
-            test: '/api/test',
-            auth: '/api/auth/login',
-            dishgroups: '/api/dishgroups',
-            dishitems: '/api/dishitems',
-            sales: '/api/sales'
-        },
-        time: new Date().toISOString()
-    });
-});
+
+
 // Test route
 app.get('/api/test', (req, res) => {
     res.json({ 
