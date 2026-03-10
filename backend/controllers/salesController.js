@@ -1,88 +1,44 @@
 const { getPool, sql } = require('../config/db');
 
-// backend/controllers/salesController.js
-
-// backend/controllers/salesController.js - Update createSale
-
+// CREATE sale (already good)
 const createSale = async (req, res) => {
     try {
         const { total, paymentMethod, items } = req.body;
         const userId = req.user.id;
         
-        // 🔍 DEBUG: See what's coming from frontend
-        console.log('🔍 RAW ITEMS FROM FRONTEND:', JSON.stringify(items, null, 2));
-        
-        // ✅ CRITICAL: Ensure each item has category
-        const itemsWithCategory = items.map(item => {
-            // 🔍 Check each item's fields
-            console.log(`🔍 Item "${item.name}" fields:`, {
-                has_category: !!item.category,
-                category_value: item.category,
-                has_displayCategory: !!item.displayCategory,
-                displayCategory_value: item.displayCategory,
-                has_originalCategory: !!item.originalCategory,
-                originalCategory_value: item.originalCategory
-            });
-            
-            return {
-                id: item.id,
-                name: item.name,
-                price: item.price,
-                quantity: item.quantity,
-                // Try all fields
-                category: item.category || item.displayCategory || 'Uncategorized',
-                displayCategory: item.displayCategory || item.category || 'Uncategorized',
-    originalCategory: item.originalCategory || item.category
-            };
-        });
-        
-        console.log('📦 FINAL items with categories:', itemsWithCategory.map(i => ({
-            name: i.name,
-            category: i.category
-        })));
+        // Process items
+        const itemsWithCategory = items.map(item => ({
+            id: item.id,
+            name: item.name,
+            price: item.price,
+            quantity: item.quantity,
+            category: item.category || item.displayCategory || 'Uncategorized',
+            displayCategory: item.displayCategory || item.category || 'Uncategorized',
+            originalCategory: item.originalCategory || item.category
+        }));
         
         const itemsJson = JSON.stringify(itemsWithCategory);
         
         const pool = getPool();
         
-        await pool.request()
+        const result = await pool.request()
             .input('total', sql.Decimal(10,2), total)
             .input('paymentMethod', sql.NVarChar, paymentMethod)
             .input('itemsJson', sql.NVarChar, itemsJson)
             .input('userId', sql.Int, userId)
             .query(`
                 INSERT INTO Sales (Total, PaymentMethod, ItemsJson, UserId)
+                OUTPUT INSERTED.Id, INSERTED.Total, INSERTED.PaymentMethod, INSERTED.SaleDate
                 VALUES (@total, @paymentMethod, @itemsJson, @userId)
             `);
 
-        const result = await pool.request()
-            .query('SELECT TOP 1 Id, Total, PaymentMethod, SaleDate, ItemsJson FROM Sales ORDER BY Id DESC');
-
-        const savedSale = result.recordset[0];
-        
-        let parsedItems = itemsWithCategory;
-        if (savedSale.ItemsJson) {
-            try {
-                parsedItems = typeof savedSale.ItemsJson === 'string' 
-                    ? JSON.parse(savedSale.ItemsJson)
-                    : savedSale.ItemsJson;
-            } catch (e) {
-                console.error('Parse error:', e);
-            }
-        }
-
         const newSale = {
-            id: savedSale.Id,
-            total: savedSale.Total,
-            paymentMethod: savedSale.PaymentMethod,
-            date: savedSale.SaleDate,
-            items: parsedItems
+            id: result.recordset[0].Id,
+            total: result.recordset[0].Total,
+            paymentMethod: result.recordset[0].PaymentMethod,
+            date: result.recordset[0].SaleDate,
+            items: itemsWithCategory
         };
-
-        console.log('✅ Sale saved:', {
-            id: newSale.id,
-            items: parsedItems.map(i => ({name: i.name, category: i.category}))
-        });
         
         res.status(201).json(newSale);
         
@@ -92,21 +48,17 @@ const createSale = async (req, res) => {
     }
 };
 
-// Get filtered sales
-
+// OPTIMIZED getSales
 const getSales = async (req, res) => {
     try {
         const { filter, startDate, endDate } = req.query;
         const userId = req.user.id;
         const pool = getPool();
         
-        console.log('📊 Getting sales for user:', userId);
-        
-        let query = 'SELECT Id, Total, PaymentMethod, SaleDate, CAST(ItemsJson AS NVARCHAR(MAX)) as ItemsJson FROM Sales WHERE UserId = @userId';
+        // ✅ Use WITH (NOLOCK) for read-only queries
+        let query = 'SELECT Id, Total, PaymentMethod, SaleDate, CAST(ItemsJson AS NVARCHAR(MAX)) as ItemsJson FROM Sales WITH (NOLOCK) WHERE UserId = @userId';
         const request = pool.request();
         request.input('userId', sql.Int, userId);
-
-        console.log('Filter:', filter, 'Start:', startDate, 'End:', endDate);
 
         if (filter === 'today') {
             query += ' AND CAST(SaleDate AS DATE) = CAST(GETDATE() AS DATE)';
@@ -130,17 +82,15 @@ const getSales = async (req, res) => {
         }
 
         query += ' ORDER BY SaleDate DESC';
-        console.log('Final query:', query);
         
         const result = await request.query(query);
-        console.log(`Found ${result.recordset.length} sales`);
         
+        // ✅ Parse JSON efficiently
         const formattedSales = result.recordset.map(sale => {
             let items = [];
             try {
-                items = sale.ItemsJson ? JSON.parse(sale.ItemsJson) : [];
+                items = JSON.parse(sale.ItemsJson || '[]');
             } catch (e) {
-                console.error('Parse error:', e);
                 items = [];
             }
             
@@ -153,26 +103,41 @@ const getSales = async (req, res) => {
             };
         });
 
-        console.log(`✅ Found ${formattedSales.length} sales`);
         res.json(formattedSales);
-        
     } catch (err) {
-        console.error('❌ Error:', err);
-        // Return empty array on error instead of 500
-        res.json([]);
+        console.error('Error getting sales:', err);
+        res.status(500).json({ error: err.message });
     }
 };
-// Get sales summary
+
+// OPTIMIZED getSalesSummary
+// backend/controllers/salesController.js - UPDATE getSalesSummary
+
 const getSalesSummary = async (req, res) => {
     try {
         const { filter, startDate, endDate } = req.query;
         const userId = req.user.id;
         const pool = getPool();
         
-        let query = 'SELECT * FROM Sales WHERE UserId = @userId';
+        // ✅ FIXED QUERY - Convert JSON value to INT before SUM
+        let query = `
+            SELECT 
+                COUNT(*) as totalSales,
+                ISNULL(SUM(Total), 0) as totalRevenue,
+                PaymentMethod,
+                -- ✅ Fix: Use TRY_CAST to convert JSON value to INT
+                ISNULL((
+                    SELECT SUM(TRY_CAST(JSON_VALUE(value, '$.quantity') AS INT))
+                    FROM OPENJSON(ItemsJson)
+                ), 0) as itemsCount
+            FROM Sales WITH (NOLOCK)
+            WHERE UserId = @userId
+        `;
+        
         const request = pool.request();
         request.input('userId', sql.Int, userId);
 
+        // Date filters
         if (filter === 'today') {
             query += ' AND CAST(SaleDate AS DATE) = CAST(GETDATE() AS DATE)';
         } 
@@ -185,6 +150,7 @@ const getSalesSummary = async (req, res) => {
         else if (filter === 'custom' && startDate && endDate) {
             const start = new Date(startDate);
             const end = new Date(endDate);
+            start.setHours(0, 0, 0, 0);
             end.setHours(23, 59, 59, 999);
             
             query += ' AND SaleDate >= @startDate AND SaleDate <= @endDate';
@@ -192,25 +158,19 @@ const getSalesSummary = async (req, res) => {
             request.input('endDate', sql.DateTime, end);
         }
 
+        query += ' GROUP BY PaymentMethod, ItemsJson';
+        
         const result = await request.query(query);
         
+        // Calculate totals
         let totalRevenue = 0;
         let totalItems = 0;
         const paymentBreakdown = {};
         
-        result.recordset.forEach(sale => {
-            totalRevenue += sale.Total;
-            
-            try {
-                const items = JSON.parse(sale.ItemsJson);
-                items.forEach(item => {
-                    totalItems += item.quantity || 0;
-                });
-            } catch (e) {
-                console.error('Error parsing items');
-            }
-            
-            paymentBreakdown[sale.PaymentMethod] = (paymentBreakdown[sale.PaymentMethod] || 0) + sale.Total;
+        result.recordset.forEach(row => {
+            totalRevenue += row.totalRevenue;
+            totalItems += parseInt(row.itemsCount || 0);
+            paymentBreakdown[row.PaymentMethod] = row.totalRevenue;
         });
 
         res.json({
@@ -219,39 +179,27 @@ const getSalesSummary = async (req, res) => {
             totalItems,
             paymentBreakdown
         });
+        
     } catch (err) {
         console.error('Error getting sales summary:', err);
         res.status(500).json({ error: err.message });
     }
 };
 
-// ============ NEW CATEGORY-WISE FUNCTIONS ============
-
-/**
- * ✅ Get sales by category with date/time filter
- * Endpoint: GET /api/sales/by-category?filter=today&startDate=2026-03-01&endDate=2026-03-03&startTime=09:00&endTime=18:00
- */
-// backend/controllers/salesController.js
-
-/**
- * ✅ FIXED: Get sales by category with date/time filter
- * Endpoint: GET /api/sales/by-category?filter=today
- */
-// backend/controllers/salesController.js - FIXED getSalesByCategory
-
+// OPTIMIZED getSalesByCategory
+// OPTIMIZED getSalesByCategory - Only fetch needed data
 const getSalesByCategory = async (req, res) => {
     try {
         const { filter, startDate, endDate } = req.query;
         const userId = req.user.id;
         const pool = getPool();
         
-        let query = 'SELECT Id, Total, PaymentMethod, SaleDate, CAST(ItemsJson AS NVARCHAR(MAX)) as ItemsJson FROM Sales WHERE UserId = @userId';
+        // ✅ Only fetch Id and ItemsJson - not Total, PaymentMethod, etc.
+        let query = 'SELECT Id, CAST(ItemsJson AS NVARCHAR(MAX)) as ItemsJson FROM Sales WITH (NOLOCK) WHERE UserId = @userId';
         const request = pool.request();
         request.input('userId', sql.Int, userId);
 
-        console.log('📊 Category filter:', { filter, startDate, endDate });
-
-        // Apply date filters
+        // Apply date filters (same as before)
         if (filter === 'today') {
             query += ' AND CAST(SaleDate AS DATE) = CAST(GETDATE() AS DATE)';
         } 
@@ -274,35 +222,19 @@ const getSalesByCategory = async (req, res) => {
 
         const result = await request.query(query);
         
-        // 🔍 DEBUG: See raw ItemsJson from database
-        console.log('🔍 RAW DATA FROM DATABASE:');
-        result.recordset.forEach((sale, index) => {
-            try {
-                const items = JSON.parse(sale.ItemsJson);
-                console.log(`\n📦 Sale #${index + 1} (ID: ${sale.Id}):`);
-                items.forEach(item => {
-                    console.log(`   Item: ${item.name}`);
-                    console.log(`   → category: ${item.category}`);
-                    console.log(`   → displayCategory: ${item.displayCategory}`);
-                    console.log(`   → originalCategory: ${item.originalCategory}`);
-                    console.log(`   → All fields:`, Object.keys(item));
-                });
-            } catch (e) {
-                console.log(`Sale ${index + 1}: Parse error -`, e.message);
-            }
-        });
-
-        // Process data with proper category grouping
+        // Process data (same logic, but faster because less data)
+        // ... rest of your code
+        
+        // Process data
         const categoryMap = new Map();
         const transactionSet = new Set();
         
         result.recordset.forEach(sale => {
             transactionSet.add(sale.Id);
             try {
-                const itemsList = JSON.parse(sale.ItemsJson);
+                const itemsList = JSON.parse(sale.ItemsJson || '[]');
                 
                 itemsList.forEach(item => {
-                    // Get category - try all possible fields
                     const categoryName = item.displayCategory || item.category || item.originalCategory || 'Uncategorized';
                     
                     if (!categoryMap.has(categoryName)) {
@@ -322,7 +254,6 @@ const getSalesByCategory = async (req, res) => {
                     category.totalQuantity += (item.quantity || 1);
                     category.transactions.add(sale.Id);
                     
-                    // Track individual items
                     const itemName = item.name;
                     if (!category.items.has(itemName)) {
                         category.items.set(itemName, {
@@ -341,7 +272,7 @@ const getSalesByCategory = async (req, res) => {
                 });
                 
             } catch (e) {
-                console.error('Parse error:', e);
+                // Skip invalid JSON
             }
         });
         
@@ -372,14 +303,7 @@ const getSalesByCategory = async (req, res) => {
             totalItems += catData.totalQuantity;
         }
         
-        // Sort categories by revenue
         formattedCategories.sort((a, b) => b.totalRevenue - a.totalRevenue);
-        
-        console.log('\n✅ FINAL CATEGORIES:', formattedCategories.map(c => ({
-            name: c.name,
-            revenue: c.totalRevenue,
-            items: c.items.map(i => `${i.name}(${i.quantity})`)
-        })));
         
         res.json({
             success: true,
@@ -402,11 +326,8 @@ const getSalesByCategory = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
-/**
- * ✅ FIXED: Get items for a specific category
- */
-// backend/controllers/salesController.js - FIXED getCategoryItems
 
+// OPTIMIZED getCategoryItems
 const getCategoryItems = async (req, res) => {
     try {
         const { category } = req.params;
@@ -414,13 +335,10 @@ const getCategoryItems = async (req, res) => {
         const userId = req.user.id;
         const pool = getPool();
         
-        let query = 'SELECT Id, Total, PaymentMethod, SaleDate, CAST(ItemsJson AS NVARCHAR(MAX)) as ItemsJson FROM Sales WHERE UserId = @userId';
+        let query = 'SELECT Id, SaleDate, CAST(ItemsJson AS NVARCHAR(MAX)) as ItemsJson FROM Sales WITH (NOLOCK) WHERE UserId = @userId';
         const request = pool.request();
         request.input('userId', sql.Int, userId);
 
-        console.log(`📊 Loading items for category: ${category}`);
-
-        // Apply date filters
         if (filter === 'today') {
             query += ' AND CAST(SaleDate AS DATE) = CAST(GETDATE() AS DATE)';
         } 
@@ -443,13 +361,13 @@ const getCategoryItems = async (req, res) => {
 
         const result = await request.query(query);
         
-        // Process items and transactions for this category
+        // Process items
         const itemMap = new Map();
-        const transactions = []; // ✅ NEW: Store all transactions
+        const transactions = [];
         
         result.recordset.forEach(sale => {
             try {
-                const itemsList = JSON.parse(sale.ItemsJson);
+                const itemsList = JSON.parse(sale.ItemsJson || '[]');
                 itemsList.forEach(item => {
                     const itemCategory = item.displayCategory || item.category || item.originalCategory || 'Uncategorized';
                     
@@ -459,7 +377,6 @@ const getCategoryItems = async (req, res) => {
                         const price = item.price || 0;
                         const revenue = price * quantity;
                         
-                        // Track items (for summary)
                         if (!itemMap.has(itemName)) {
                             itemMap.set(itemName, {
                                 name: itemName,
@@ -475,7 +392,6 @@ const getCategoryItems = async (req, res) => {
                         catItem.revenue += revenue;
                         catItem.transactions.add(sale.Id);
                         
-                        // ✅ NEW: Track each transaction separately
                         transactions.push({
                             saleId: sale.Id,
                             saleDate: sale.SaleDate,
@@ -487,11 +403,10 @@ const getCategoryItems = async (req, res) => {
                     }
                 });
             } catch (e) {
-                console.error('Parse error:', e);
+                // Skip invalid JSON
             }
         });
         
-        // Format items list
         const itemsList = Array.from(itemMap.values())
             .map(item => ({
                 ...item,
@@ -502,9 +417,6 @@ const getCategoryItems = async (req, res) => {
         const totalRevenue = itemsList.reduce((sum, item) => sum + item.revenue, 0);
         const totalQuantity = itemsList.reduce((sum, item) => sum + item.quantity, 0);
         
-        console.log(`✅ Found ${itemsList.length} items in ${category}`);
-        console.log(`✅ Found ${transactions.length} transactions in ${category}`);
-        
         res.json({
             success: true,
             category,
@@ -512,7 +424,7 @@ const getCategoryItems = async (req, res) => {
             totalQuantity,
             totalItems: itemsList.length,
             items: itemsList,
-            transactions: transactions // ✅ NEW: Send transactions to frontend
+            transactions: transactions
         });
         
     } catch (err) {
