@@ -81,51 +81,72 @@ export const CurrencyProvider = ({ children }: { children: React.ReactNode }) =>
     }
   };
 
-  const loadCurrencyFromSettings = async () => {
-    if (!user?.id) {
-      console.log('⚠️ No user ID, using defaults');
-      return;
-    }
+ const loadCurrencyFromSettings = async (retryCount = 0) => {
+  if (!user?.id) {
+    console.log('⚠️ No user ID, using defaults');
+    return;
+  }
 
-    console.log(`🔄 Loading currency for user ${user.id}...`);
+  console.log(`🔄 Loading currency for user ${user.id}...`);
+  
+  try {
+    // ✅ Add timeout and better error handling
+    const response = await API.get(`/company-settings/${user.id}`, {
+      timeout: 4000 // 10 second timeout
+    });
     
-    try {
-      const response = await API.get(`/company-settings/${user.id}`);
+    if (response.data.success) {
+      const settings = response.data.settings;
+      const newCode = settings.Currency || settings.currency || 'SGD';
+      const newSymbol = settings.CurrencySymbol || settings.currencySymbol || '$';
       
-      if (response.data.success) {
-        const settings = response.data.settings;
-        const newCode = settings.CurrencyCode || settings.currency || 'SGD';
-        const newSymbol = settings.CurrencySymbol || settings.currencySymbol || '$';
-        
-        console.log(`✅ Loaded currency: ${newCode} (${newSymbol}) for user ${user.id}`);
-        
-        // Always update when loading for current user
-        setCurrencyCode(newCode);
-        setCurrencySymbol(newSymbol);
-        
-        // Save to AsyncStorage with user prefix
-        await AsyncStorage.setItem(`currencyCode_${user.id}`, newCode);
-        await AsyncStorage.setItem(`currencySymbol_${user.id}`, newSymbol);
-      } else {
-        console.log('⚠️ No settings found, using defaults');
-      }
-    } catch (error) {
-      console.log('Error loading currency from settings:', error);
+      console.log(`✅ Loaded currency: ${newCode} (${newSymbol})`);
       
-      // Try to load user-specific saved currency
-      try {
-        const savedCode = await AsyncStorage.getItem(`currencyCode_${user.id}`);
-        const savedSymbol = await AsyncStorage.getItem(`currencySymbol_${user.id}`);
-        
-        if (savedCode && savedSymbol) {
-          setCurrencyCode(savedCode);
-          setCurrencySymbol(savedSymbol);
-        }
-      } catch (e) {
-        // Keep defaults
+      setCurrencyCode(newCode);
+      setCurrencySymbol(newSymbol);
+      
+      await AsyncStorage.setItem(`currencyCode_${user.id}`, newCode);
+      await AsyncStorage.setItem(`currencySymbol_${user.id}`, newSymbol);
+    }
+  } catch (error: any) {
+    // ✅ Detailed error logging
+    console.log('❌ Currency load error details:', {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      url: error.config?.url,
+      method: error.config?.method
+    });
+    
+    // ✅ Retry logic for network errors
+    if (error.code === 'ECONNABORTED' || error.message === 'Network Error') {
+      if (retryCount < 3) {
+        console.log(`🔄 Retrying... attempt ${retryCount + 1}/3`);
+        setTimeout(() => {
+          loadCurrencyFromSettings(retryCount + 1);
+        }, 2000 * (retryCount + 1)); // 2s, 4s, 6s delay
+        return;
       }
     }
-  };
+    
+    // Fallback to saved currency
+    try {
+      const savedCode = await AsyncStorage.getItem(`currencyCode_${user.id}`);
+      const savedSymbol = await AsyncStorage.getItem(`currencySymbol_${user.id}`);
+      
+      if (savedCode && savedSymbol) {
+        setCurrencyCode(savedCode);
+        setCurrencySymbol(savedSymbol);
+        console.log('✅ Using saved currency from storage');
+      } else {
+        // Keep defaults
+        console.log('⚠️ Using default currency');
+      }
+    } catch (e) {
+      // Keep defaults
+    }
+  }
+};
 
   const formatPrice = useCallback((amount: number): string => {
     if (amount === undefined || amount === null) return `${currencySymbol}0.00`;
