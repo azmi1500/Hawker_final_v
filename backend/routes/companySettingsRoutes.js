@@ -18,74 +18,49 @@ router.get('/:userId', authenticateToken, async (req, res) => {
         
         const pool = getPool();
         
-        // Also get shop name from Users table (readonly)
-        const userResult = await pool.request()
-            .input('userId', sql.Int, userId)
-            .query(`
-                SELECT ShopName 
-                FROM Users 
-                WHERE Id = @userId
-            `);
-        
-        const shopName = userResult.recordset[0]?.ShopName || '';
-        
+        // ✅ Use a single query with LEFT JOIN to get both in one go
         const result = await pool.request()
             .input('userId', sql.Int, userId)
             .query(`
                 SELECT 
-                    CompanyName,
-                    Address,
-                    GSTNo,
-                    GSTPercentage,
-                    Phone,
-                    Email,
-                    CashierName,
-                    Currency,
-                    CurrencySymbol
-                FROM CompanySettings 
-                WHERE UserId = @userId
+                    u.ShopName,
+                    ISNULL(c.CompanyName, '') as CompanyName,
+                    ISNULL(c.Address, '') as Address,
+                    ISNULL(c.GSTNo, '') as GSTNo,
+                    ISNULL(c.GSTPercentage, 9) as GSTPercentage,
+                    ISNULL(c.Phone, '') as Phone,
+                    ISNULL(c.Email, '') as Email,
+                    ISNULL(c.CashierName, '') as CashierName,
+                    ISNULL(c.Currency, 'SGD') as Currency,
+                    ISNULL(c.CurrencySymbol, '$') as CurrencySymbol
+                FROM Users u
+                LEFT JOIN CompanySettings c ON u.Id = c.UserId
+                WHERE u.Id = @userId
             `);
         
         if (result.recordset.length === 0) {
-            // Create default settings if none exist
-            await pool.request()
-                .input('userId', sql.Int, userId)
-                .input('companyName', sql.NVarChar, '')
-                .input('address', sql.NVarChar, '')
-                .input('gstNo', sql.NVarChar, '')
-                .input('gstPercentage', sql.Decimal(5,2), 9) // Singapore default 9%
-                .input('phone', sql.NVarChar, '')
-                .input('email', sql.NVarChar, '')
-                .input('cashierName', sql.NVarChar, '')
-                .input('currency', sql.NVarChar, 'SGD')
-                .input('currencySymbol', sql.NVarChar, '$')
-                .query(`
-                    INSERT INTO CompanySettings 
-                    (UserId, CompanyName, Address, GSTNo, GSTPercentage, Phone, Email, CashierName, Currency, CurrencySymbol)
-                    VALUES (@userId, @companyName, @address, @gstNo, @gstPercentage, @phone, @email, @cashierName, @currency, @currencySymbol)
-                `);
-            
-            return res.json({
-                success: true,
-                settings: {
-                    CompanyName: '',
-                    Address: '',
-                    GSTNo: '',
-                    GSTPercentage: 9,
-                    Phone: '',
-                    Email: '',
-                    CashierName: '',
-                    Currency: 'SGD',
-                    CurrencySymbol: ''
-                },
-                shopName: shopName // Send shop name from Users table
-            });
+            return res.status(404).json({ error: 'User not found' });
         }
+        
+        const row = result.recordset[0];
+        
+        // ✅ If no settings exist, return defaults
+        const settings = {
+            CompanyName: row.CompanyName,
+            Address: row.Address,
+            GSTNo: row.GSTNo,
+            GSTPercentage: row.GSTPercentage,
+            Phone: row.Phone,
+            Email: row.Email,
+            CashierName: row.CashierName,
+            Currency: row.Currency,
+            CurrencySymbol: row.CurrencySymbol
+        };
         
         res.json({
             success: true,
-            settings: result.recordset[0],
-            shopName: shopName // Send shop name from Users table
+            settings,
+            shopName: row.ShopName
         });
         
     } catch (err) {
@@ -119,27 +94,25 @@ router.post('/:userId', authenticateToken, async (req, res) => {
         
         const pool = getPool();
         
-        // Check if settings exist
-        const exists = await pool.request()
+        // ✅ SINGLE QUERY using MERGE (insert or update in one go)
+        await pool.request()
             .input('userId', sql.Int, userId)
-            .query('SELECT Id FROM CompanySettings WHERE UserId = @userId');
-        
-        if (exists.recordset.length > 0) {
-            // Update
-            await pool.request()
-                .input('userId', sql.Int, userId)
-                .input('companyName', sql.NVarChar, CompanyName || '')
-                .input('address', sql.NVarChar, Address || '')
-                .input('gstNo', sql.NVarChar, GSTNo || '')
-                .input('gstPercentage', sql.Decimal(5,2), GSTPercentage || 9)
-                .input('phone', sql.NVarChar, Phone || '')
-                .input('email', sql.NVarChar, Email || '')
-                .input('cashierName', sql.NVarChar, CashierName || '')
-                .input('currency', sql.NVarChar, Currency || 'SGD')
-                .input('currencySymbol', sql.NVarChar, CurrencySymbol || '')
-                .query(`
-                    UPDATE CompanySettings 
-                    SET CompanyName = @companyName,
+            .input('companyName', sql.NVarChar, CompanyName || '')
+            .input('address', sql.NVarChar, Address || '')
+            .input('gstNo', sql.NVarChar, GSTNo || '')
+            .input('gstPercentage', sql.Decimal(5,2), GSTPercentage || 9)
+            .input('phone', sql.NVarChar, Phone || '')
+            .input('email', sql.NVarChar, Email || '')
+            .input('cashierName', sql.NVarChar, CashierName || '')
+            .input('currency', sql.NVarChar, Currency || 'SGD')
+            .input('currencySymbol', sql.NVarChar, CurrencySymbol || '$')
+            .query(`
+                MERGE INTO CompanySettings AS target
+                USING (SELECT @userId AS UserId) AS source
+                ON target.UserId = source.UserId
+                WHEN MATCHED THEN
+                    UPDATE SET 
+                        CompanyName = @companyName,
                         Address = @address,
                         GSTNo = @gstNo,
                         GSTPercentage = @gstPercentage,
@@ -148,27 +121,10 @@ router.post('/:userId', authenticateToken, async (req, res) => {
                         CashierName = @cashierName,
                         Currency = @currency,
                         CurrencySymbol = @currencySymbol
-                    WHERE UserId = @userId
-                `);
-        } else {
-            // Insert
-            await pool.request()
-                .input('userId', sql.Int, userId)
-                .input('companyName', sql.NVarChar, CompanyName || '')
-                .input('address', sql.NVarChar, Address || '')
-                .input('gstNo', sql.NVarChar, GSTNo || '')
-                .input('gstPercentage', sql.Decimal(5,2), GSTPercentage || 9)
-                .input('phone', sql.NVarChar, Phone || '')
-                .input('email', sql.NVarChar, Email || '')
-                .input('cashierName', sql.NVarChar, CashierName || 'Admin')
-                .input('currency', sql.NVarChar, Currency || 'SGD')
-                .input('currencySymbol', sql.NVarChar, CurrencySymbol || '')
-                .query(`
-                    INSERT INTO CompanySettings 
-                    (UserId, CompanyName, Address, GSTNo, GSTPercentage, Phone, Email, CashierName, Currency, CurrencySymbol)
-                    VALUES (@userId, @companyName, @address, @gstNo, @gstPercentage, @phone, @email, @cashierName, @currency, @currencySymbol)
-                `);
-        }
+                WHEN NOT MATCHED THEN
+                    INSERT (UserId, CompanyName, Address, GSTNo, GSTPercentage, Phone, Email, CashierName, Currency, CurrencySymbol)
+                    VALUES (@userId, @companyName, @address, @gstNo, @gstPercentage, @phone, @email, @cashierName, @currency, @currencySymbol);
+            `);
         
         res.json({ 
             success: true, 
