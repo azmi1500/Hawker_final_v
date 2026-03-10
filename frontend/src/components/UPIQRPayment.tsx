@@ -116,7 +116,8 @@ const UPIQRPayment: React.FC<UPIQRPaymentProps> = ({
               <View style={styles.qrContainer}>
                 <View style={[styles.qrBox, { backgroundColor: '#fff' }]}>
                   <QRCode
-                    value={`upi://pay?pa=${upiId}&pn=${encodeURIComponent(shopName)}&am=${amount}&cu=INR`}
+                    value={`upi://pay?pa=${encodeURIComponent(upiId || '')}&pn=${encodeURIComponent(shopName || '')}&am=${amount}&cu=INR`}
+
                     size={200}
                     color="#000"
                     backgroundColor="#fff"
