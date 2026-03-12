@@ -1,5 +1,5 @@
 // src/screens/LoginScreen.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,18 +13,79 @@ import {
   ScrollView,
   StatusBar,
   Image,
+  Switch  
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // ✅ ADD THIS
 import { useAuth } from '../context/AuthContext';
+
 const companyLogo = require('../../assets/images/unipro-logo-white.png');
+
 export default function LoginScreen() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  
+  const [rememberMe, setRememberMe] = useState(false); // ✅ NEW
+  const [checkingStorage, setCheckingStorage] = useState(true); // ✅ NEW
+
   const { login } = useAuth();
+
+  // ✅ Load saved credentials when screen opens
+  useEffect(() => {
+    loadSavedCredentials();
+  }, []);
+
+  // ✅ Function to load saved credentials
+  const loadSavedCredentials = async () => {
+    try {
+      const savedUsername = await AsyncStorage.getItem('remember_username');
+      const savedPassword = await AsyncStorage.getItem('remember_password');
+      const savedRemember = await AsyncStorage.getItem('remember_me');
+      
+      if (savedUsername && savedPassword && savedRemember === 'true') {
+        setUsername(savedUsername);
+        setPassword(savedPassword);
+        setRememberMe(true);
+        console.log('✅ Loaded saved credentials for:', savedUsername);
+      }
+    } catch (error) {
+      console.log('❌ Error loading saved credentials:', error);
+    } finally {
+      setCheckingStorage(false);
+    }
+  };
+
+  // ✅ Save credentials if remember me is checked
+  const saveCredentials = async (username: string, password: string) => {
+    try {
+      if (rememberMe) {
+        await AsyncStorage.setItem('remember_username', username);
+        await AsyncStorage.setItem('remember_password', password);
+        await AsyncStorage.setItem('remember_me', 'true');
+        console.log('✅ Credentials saved for:', username);
+      } else {
+        await AsyncStorage.removeItem('remember_username');
+        await AsyncStorage.removeItem('remember_password');
+        await AsyncStorage.setItem('remember_me', 'false');
+        console.log('🧹 Cleared saved credentials');
+      }
+    } catch (error) {
+      console.log('❌ Error saving credentials:', error);
+    }
+  };
+
+  // ✅ Clear saved credentials (optional - for testing)
+  const clearSavedCredentials = async () => {
+    await AsyncStorage.removeItem('remember_username');
+    await AsyncStorage.removeItem('remember_password');
+    await AsyncStorage.setItem('remember_me', 'false');
+    setUsername('');
+    setPassword('');
+    setRememberMe(false);
+    Alert.alert('✅ Cleared', 'Saved credentials cleared');
+  };
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {
@@ -39,19 +100,27 @@ export default function LoginScreen() {
       const success = await login(username, password);
       
       if (success) {
-        console.log('✅ Login successful, navigating to POS...');
-        // Navigation will happen automatically via AppNavigator
-      } else {
-        
+        // ✅ Save credentials after successful login
+        await saveCredentials(username, password);
+        console.log('✅ Login successful');
       }
     } catch (error: any) {
-    // This should never happen since AuthContext catches errors
-   
-  } finally {
-    setLoading(false);
+      console.log('❌ Login error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Show loading while checking storage
+  if (checkingStorage) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#FF4444" />
+      </View>
+    );
   }
-};
-   return (
+
+  return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
       
@@ -83,6 +152,7 @@ export default function LoginScreen() {
 
             {/* Login Form */}
             <View style={styles.formContainer}>
+              {/* Username Input */}
               <View style={styles.inputContainer}>
                 <MaterialIcons name="person" size={20} color="#666" />
                 <TextInput
@@ -94,8 +164,14 @@ export default function LoginScreen() {
                   autoCapitalize="none"
                   editable={!loading}
                 />
+                {username !== '' && (
+                  <TouchableOpacity onPress={() => setUsername('')}>
+                    <MaterialIcons name="close" size={20} color="#999" />
+                  </TouchableOpacity>
+                )}
               </View>
 
+              {/* Password Input */}
               <View style={styles.inputContainer}>
                 <MaterialIcons name="lock" size={20} color="#666" />
                 <TextInput
@@ -106,7 +182,7 @@ export default function LoginScreen() {
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
                   editable={!loading}
-                    autoCapitalize="none"  
+                  autoCapitalize="none"  
                 />
                 <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
                   <MaterialIcons 
@@ -117,6 +193,22 @@ export default function LoginScreen() {
                 </TouchableOpacity>
               </View>
 
+              {/* ✅ REMEMBER ME SECTION */}
+              <View style={styles.rememberMeContainer}>
+                <View style={styles.rememberMeLeft}>
+                  <Switch
+                    value={rememberMe}
+                    onValueChange={setRememberMe}
+                    trackColor={{ false: '#ddd', true: '#FF4444' }}
+                    thumbColor={rememberMe ? '#fff' : '#f4f3f4'}
+                  />
+                  <Text style={styles.rememberMeText}>Remember Me</Text>
+                </View>
+
+              
+              </View>
+
+              {/* Login Button */}
               <TouchableOpacity
                 style={[styles.loginButton, loading && styles.disabledButton]}
                 onPress={handleLogin}
@@ -128,6 +220,13 @@ export default function LoginScreen() {
                   <Text style={styles.loginButtonText}>Login</Text>
                 )}
               </TouchableOpacity>
+
+              {/* Hint text */}
+              {rememberMe && (
+                <Text style={styles.hintText}>
+                  🔒 Your credentials will be saved on this device
+                </Text>
+              )}
             </View>
 
             {/* Company Name and Copyright */}
@@ -146,6 +245,7 @@ export default function LoginScreen() {
   );
 }
 
+// ✅ STYLES - Add these new styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -153,20 +253,6 @@ const styles = StyleSheet.create({
   },
   keyboardView: {
     flex: 1,
-  },
-   companyFooter: {
-    marginTop: 30,
-    alignItems: 'center',
-  },
-  companyName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
-  },
-  copyright: {
-    fontSize: 10,
-    color: '#999',
   },
   scrollContent: {
     flexGrow: 1,
@@ -186,7 +272,7 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
   },
- logoContainer: {
+  logoContainer: {
     width: 120,
     height: 120,
     borderRadius: 60,
@@ -237,6 +323,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
   },
+  // ✅ NEW STYLES
+  rememberMeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 4,
+  },
+  rememberMeLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  rememberMeText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  clearText: {
+    fontSize: 12,
+    color: '#999',
+    textDecorationLine: 'underline',
+    padding: 4,
+  },
+  hintText: {
+    fontSize: 11,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 8,
+    fontStyle: 'italic',
+  },
   loginButton: {
     height: 50,
     backgroundColor: '#FF4444',
@@ -253,6 +371,21 @@ const styles = StyleSheet.create({
   disabledButton: {
     opacity: 0.7,
   },
+  companyFooter: {
+    marginTop: 30,
+    alignItems: 'center',
+  },
+  companyName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  copyright: {
+    fontSize: 10,
+    color: '#999',
+  },
+  // Keep existing styles
   divider: {
     flexDirection: 'row',
     alignItems: 'center',

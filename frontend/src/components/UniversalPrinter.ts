@@ -1,4 +1,4 @@
-// frontend/src/components/UniversalPrinter.ts - FIXED WITH TIMEOUT ✅
+// frontend/src/components/UniversalPrinter.ts - MULTI-TYPE SUPPORT ✅
 
 import { Alert, Platform, NativeModules } from 'react-native';
 import * as Print from 'expo-print';
@@ -182,43 +182,31 @@ class UniversalPrinter {
 
       console.log(`🎯 Selected printer: ${selectedPrinter.name} (${selectedPrinter.type})`);
 
-      // ✅ ADD TIMEOUT TO ALL PRINT OPERATIONS
-      const printWithTimeout = async (printFn: () => Promise<boolean>, timeoutMs = 5000) => {
-        const timeoutPromise = new Promise<boolean>((_, reject) => {
-          setTimeout(() => reject(new Error('Print timeout')), timeoutMs);
-        });
-        
-        return Promise.race([
-          printFn(),
-          timeoutPromise
-        ]) as Promise<boolean>;
-      };
-
       // Print based on printer type
       let printed = false;
 
       switch (selectedPrinter.type) {
         case 'thermal':
         case 'receipt':
-          printed = await printWithTimeout(() => this.printThermalReceipt(saleData, userId, selectedPrinter));
+          printed = await this.printThermalReceipt(saleData, userId, selectedPrinter);
           break;
         case 'label':
-          printed = await printWithTimeout(() => this.printLabel(saleData, selectedPrinter));
+          printed = await this.printLabel(saleData, selectedPrinter);
           break;
         case 'laser':
-          printed = await printWithTimeout(() => this.printLaser(saleData, userId, selectedPrinter));
+          printed = await this.printLaser(saleData, userId, selectedPrinter);
           break;
         case 'bluetooth':
-          printed = await printWithTimeout(() => this.printBluetooth(saleData, userId, selectedPrinter));
+          printed = await this.printBluetooth(saleData, userId, selectedPrinter);
           break;
         case 'network':
-          printed = await printWithTimeout(() => this.printNetwork(saleData, userId, selectedPrinter));
+          printed = await this.printNetwork(saleData, userId, selectedPrinter);
           break;
         case 'usb':
-          printed = await printWithTimeout(() => this.printUSB(saleData, userId, selectedPrinter));
+          printed = await this.printUSB(saleData, userId, selectedPrinter);
           break;
         default:
-          printed = await printWithTimeout(() => this.printThermalReceipt(saleData, userId, selectedPrinter));
+          printed = await this.printThermalReceipt(saleData, userId, selectedPrinter);
       }
 
       if (printed) {
@@ -226,7 +214,14 @@ class UniversalPrinter {
         return true;
       }
 
-      // If selected printer fails, offer PDF
+      // If selected printer fails, try others
+      for (const printer of printers) {
+        if (printer === selectedPrinter) continue;
+        console.log(`🔄 Trying fallback printer: ${printer.name}`);
+        // Try printing with this printer...
+      }
+
+      // All printers failed - offer PDF
       return await this.offerPDFFallback(saleData, userId, t);
 
     } catch (error) {
@@ -236,7 +231,7 @@ class UniversalPrinter {
   }
 
   /**
-   * 🔥 Print Thermal Receipt (58mm/80mm) - WITH TIMEOUT
+   * 🔥 Print Thermal Receipt (58mm/80mm)
    */
   private static async printThermalReceipt(
     saleData: any, 
@@ -244,19 +239,7 @@ class UniversalPrinter {
     printer?: PrinterInfo
   ): Promise<boolean> {
     try {
-      // ✅ Load settings with timeout
-      let company;
-      try {
-        const settingsPromise = BillPDFGenerator.loadSettings(userId);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Settings timeout')), 3000)
-        );
-        company = await Promise.race([settingsPromise, timeoutPromise]);
-      } catch {
-        console.log('⚠️ Using default settings for thermal print');
-        company = this.getDefaultSettings(saleData);
-      }
-
+      const company = await BillPDFGenerator.loadSettings(userId);
       const width = this.getPrintWidth(printer || { paperSize: '58mm' } as PrinterInfo);
       
       // Try Sunmi first
@@ -264,6 +247,8 @@ class UniversalPrinter {
         const SunmiPrinter = require('react-native-sunmi-inner-printer');
         if (SunmiPrinter) {
           await SunmiPrinter.initPrinter();
+          
+          // Format for thermal printer
           const text = this.formatThermalText(saleData, company);
           await SunmiPrinter.printText(text);
           await SunmiPrinter.cutPaper();
@@ -278,108 +263,15 @@ class UniversalPrinter {
         return true;
       } catch (e) {}
 
-      return false;
-
-    } catch (error) {
-      console.log('❌ Thermal print error:', error);
-      return false;
-    }
-  }
-
-  /**
-   * 📄 Print Laser/Inkjet (A4) - FIXED WITH TIMEOUT
-   */
-  private static async printLaser(
-    saleData: any,
-    userId?: string | number,
-    printer?: PrinterInfo
-  ): Promise<boolean> {
-    try {
-      // ✅ Load settings with timeout - don't wait more than 3 seconds
-      let company;
-      let html;
-      
-      try {
-        console.log('📄 Loading settings for laser print...');
-        const settingsPromise = BillPDFGenerator.loadSettings(userId);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Settings timeout')), 3000)
-        );
-        
-        company = await Promise.race([settingsPromise, timeoutPromise]);
-        console.log('✅ Settings loaded successfully');
-        
-        // Generate HTML with company settings
-        html = await BillPDFGenerator.generateHTML(saleData, userId);
-        
-      } catch (settingsError) {
-        console.log('⚠️ Settings timeout - using minimal template');
-        // Use minimal template without waiting for API
-        html = this.generateMinimalHTML(saleData);
-      }
-
-      // ✅ Print immediately - don't wait for anything else
-      console.log('🖨️ Sending to Android print service...');
-      await Print.printAsync({ 
-        html,
-        orientation: Print.Orientation.portrait
-      });
-      
-      console.log('✅ Print job sent successfully');
+      // Fallback to PDF generation with correct width
+      const html = await BillPDFGenerator.generateHTML(saleData, userId);
+      const { uri } = await Print.printToFileAsync({ html, width });
+      await Print.printAsync({ uri });
       return true;
-      
+
     } catch (error) {
-      console.log('❌ Laser print error:', error);
       return false;
     }
-  }
-
-  /**
-   * 📝 Generate minimal HTML when settings fail
-   */
-  private static generateMinimalHTML(saleData: any): string {
-    const date = new Date();
-    const symbol = '$'; // Default
-    
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <style>
-          body { font-family: Arial; padding: 20px; max-width: 80mm; margin: 0 auto; }
-          .header { text-align: center; margin-bottom: 20px; }
-          .shop-name { font-size: 20px; font-weight: bold; }
-          .items { width: 100%; border-collapse: collapse; }
-          .items td { padding: 8px 0; border-bottom: 1px dashed #ccc; }
-          .total { font-size: 18px; font-weight: bold; margin-top: 20px; text-align: right; }
-          .footer { text-align: center; margin-top: 30px; font-style: italic; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="shop-name">${saleData.shopName || 'POS System'}</div>
-          <div>${date.toLocaleDateString()} ${date.toLocaleTimeString()}</div>
-        </div>
-        
-        <table class="items">
-          ${saleData.items.map((item: any) => `
-            <tr>
-              <td>${item.name} x${item.quantity}</td>
-              <td align="right">${symbol}${(item.price * item.quantity).toFixed(2)}</td>
-            </tr>
-          `).join('')}
-        </table>
-        
-        <hr/>
-        <div class="total">
-          Total: ${symbol}${saleData.total.toFixed(2)}
-        </div>
-        <div class="footer">
-          Thank you! Come again!
-        </div>
-      </body>
-      </html>
-    `;
   }
 
   /**
@@ -390,15 +282,16 @@ class UniversalPrinter {
     printer: PrinterInfo
   ): Promise<boolean> {
     try {
-      let company = await this.getSettingsWithTimeout(saleData, printer);
+      // Format for label printer (simplified)
       let labelText = '';
       saleData.items.forEach((item: any) => {
         labelText += `${item.name}\n`;
         labelText += `Qty: ${item.quantity}\n`;
-        labelText += `Price: ${company?.currencySymbol || '$'}${(item.price * item.quantity).toFixed(2)}\n`;
+        labelText += `Price: $${(item.price * item.quantity).toFixed(2)}\n`;
         labelText += '---\n';
       });
 
+      // Try label printer libraries
       try {
         const LabelPrinter = require('react-native-label-printer');
         await LabelPrinter.print(labelText);
@@ -406,6 +299,30 @@ class UniversalPrinter {
       } catch (e) {}
 
       return false;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * 📄 Print Laser/Inkjet (A4)
+   */
+  private static async printLaser(
+    saleData: any,
+    userId?: string | number,
+    printer?: PrinterInfo
+  ): Promise<boolean> {
+    try {
+      // Generate full HTML with A4 styling
+      const html = await BillPDFGenerator.generateHTML(saleData, userId);
+      
+      // Use Android print service
+      await Print.printAsync({ 
+        html,
+        orientation: Print.Orientation.portrait
+      });
+      
+      return true;
     } catch (error) {
       return false;
     }
@@ -426,7 +343,7 @@ class UniversalPrinter {
         await BluetoothPrinter.connect(printer.address);
       }
       
-      const company = await this.getSettingsWithTimeout(saleData, printer);
+      const company = await BillPDFGenerator.loadSettings(userId);
       const text = this.formatThermalText(saleData, company);
       await BluetoothPrinter.print(text);
       
@@ -446,10 +363,9 @@ class UniversalPrinter {
   ): Promise<boolean> {
     try {
       const NetPrinter = require('react-native-thermal-printer');
-      const company = await this.getSettingsWithTimeout(saleData, printer);
       
       await NetPrinter.printIP(printer?.address || '', {
-        text: this.formatThermalText(saleData, company)
+        text: this.formatThermalText(saleData, await BillPDFGenerator.loadSettings(userId))
       });
       
       return true;
@@ -468,51 +384,17 @@ class UniversalPrinter {
   ): Promise<boolean> {
     try {
       const UsbPrinter = require('react-native-usb-printer');
-      const company = await this.getSettingsWithTimeout(saleData, printer);
       
       if (printer?.address) {
         await UsbPrinter.connect(printer.address);
       }
       
-      await UsbPrinter.print(this.formatThermalText(saleData, company));
+      await UsbPrinter.print(this.formatThermalText(saleData, await BillPDFGenerator.loadSettings(userId)));
       
       return true;
     } catch (error) {
       return false;
     }
-  }
-
-  /**
-   * ⏱️ Helper to get settings with timeout
-   */
-  private static async getSettingsWithTimeout(saleData: any, printer?: PrinterInfo): Promise<any> {
-    try {
-      const settingsPromise = BillPDFGenerator.loadSettings(saleData.userId);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Settings timeout')), 2000)
-      );
-      
-      return await Promise.race([settingsPromise, timeoutPromise]);
-    } catch {
-      return this.getDefaultSettings(saleData);
-    }
-  }
-
-  /**
-   * 📝 Get default settings
-   */
-  private static getDefaultSettings(saleData: any): any {
-    return {
-      name: saleData.shopName || 'POS System',
-      address: '',
-      gstNo: '',
-      gstPercentage: 9,
-      phone: '',
-      email: '',
-      cashierName: saleData.cashier || 'Admin',
-      currency: 'SGD',
-      currencySymbol: '$',
-    };
   }
 
   /**
@@ -522,14 +404,14 @@ class UniversalPrinter {
     const symbol = company.currencySymbol || '$';
     let text = '\n';
     text += '='.repeat(32) + '\n';
-    text += (company.name || 'POS').padCenter(32) + '\n';
+    text += company.name?.padCenter(32) + '\n';
     text += '='.repeat(32) + '\n';
     text += `Bill: ${Date.now()}\n`;
     text += `Date: ${new Date().toLocaleString()}\n`;
     text += '-'.repeat(32) + '\n';
     
     saleData.items.forEach((item: any) => {
-      const name = (item.name || 'Item').substring(0, 15).padEnd(15);
+      const name = item.name.substring(0, 15).padEnd(15);
       const total = (item.price * item.quantity).toFixed(2);
       text += `${name} ${item.quantity}  ${symbol}${total}\n`;
     });
@@ -562,14 +444,7 @@ class UniversalPrinter {
           { text: t?.no || 'No', onPress: () => resolve(false), style: 'cancel' },
           { text: t?.yes || 'Yes', onPress: async () => {
               try {
-                // ✅ Generate PDF with timeout
-                let html;
-                try {
-                  html = await BillPDFGenerator.generateHTML(saleData, userId);
-                } catch {
-                  html = this.generateMinimalHTML(saleData);
-                }
-                
+                const html = await BillPDFGenerator.generateHTML(saleData, userId);
                 const { uri } = await Print.printToFileAsync({ html, width: 226 });
                 if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri);
                 resolve(true);
@@ -598,20 +473,5 @@ class UniversalPrinter {
     Alert.alert('Printer Detection', message);
   }
 }
-
-// Add padCenter method if not available
-declare global {
-  interface String {
-    padCenter(length: number, char?: string): string;
-  }
-}
-
-String.prototype.padCenter = function(length: number, char: string = ' '): string {
-  const str = this.toString();
-  const spaces = length - str.length;
-  const left = Math.floor(spaces / 2);
-  const right = spaces - left;
-  return char.repeat(left) + str + char.repeat(right);
-};
 
 export default UniversalPrinter;

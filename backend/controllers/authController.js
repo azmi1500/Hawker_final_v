@@ -77,11 +77,12 @@ const login = async (req, res) => {
         await pool.request()
             .query('UPDATE Licenses SET IsActive = 0 WHERE ExpiryDate < GETDATE()');
         
-        // ✅ Get user WITH license info
+        // ✅ Get user WITH license info - NOW INCLUDES OwnerId
         const result = await pool.request()
             .input('username', sql.NVarChar, username)
             .query(`
                 SELECT u.Id, u.Username, u.PasswordHash, u.Role, u.FullName, u.Email, u.IsActive,
+                       u.OwnerId, u.ShopName,
                        l.ExpiryDate, l.LicenseKey, l.IsActive as LicenseActive
                 FROM Users u
                 LEFT JOIN Licenses l ON u.Id = l.UserId
@@ -106,10 +107,10 @@ const login = async (req, res) => {
             return res.status(401).json({ error: 'Invalid username or password' });
         }
 
-        // ✅ Check if license expired
-        if (user.ExpiryDate && new Date(user.ExpiryDate) < new Date()) {
+        // ✅ Check if license expired (skip for admin)
+        if (user.Role !== 'admin' && user.ExpiryDate && new Date(user.ExpiryDate) < new Date()) {
             return res.status(401).json({ 
-                error: 'Invalid username or password'  // Same message
+                error: 'Invalid username or password'
             });
         }
 
@@ -118,18 +119,19 @@ const login = async (req, res) => {
             .input('userId', sql.Int, user.Id)
             .query('UPDATE Users SET LastLoginDate = GETDATE() WHERE Id = @userId');
 
-        // Create token
+        // Create token with owner info
         const token = jwt.sign(
             { 
                 id: user.Id, 
                 username: user.Username, 
-                role: user.Role 
+                role: user.Role,
+                ownerId: user.OwnerId || user.Id  // For staff, this links to owner
             },
             JWT_SECRET,
             { expiresIn: '24h' }
         );
 
-        console.log('✅ Login successful for:', user.Username);
+        console.log(`✅ Login successful: ${user.Username} (${user.Role})`);
 
         res.json({
             token,
@@ -138,7 +140,9 @@ const login = async (req, res) => {
                 username: user.Username,
                 role: user.Role,
                 fullName: user.FullName,
-                email: user.Email
+                email: user.Email,
+                shopName: user.ShopName,
+                ownerId: user.OwnerId || user.Id
             }
         });
     } catch (err) {

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>POS System Monitor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; 
+            padding: 20px; 
+            background: #1a1a1a;
+            color: #fff;
+        }
+        h1 { 
+            color: #00ff00; 
+            margin-bottom: 20px;
+            font-size: 28px;
+            text-align: center;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .metric { 
+            background: #2a2a2a; 
+            padding: 20px; 
+            border-radius: 10px; 
+            border: 1px solid #444;
+        }
+        .good { color: #00ff00; }
+        .warn { color: #ffff00; }
+        .bad { color: #ff4444; }
+        .value { 
+            font-size: 32px; 
+            font-weight: bold; 
+            margin: 10px 0;
+        }
+        .label { color: #888; font-size: 14px; }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 10px;
+            background: #2a2a2a;
+            border-radius: 10px;
+        }
+        th, td { 
+            padding: 12px; 
+            text-align: left; 
+            border-bottom: 1px solid #444;
+        }
+        th { background: #333; color: #00ffff; }
+        .timestamp { color: #888; font-size: 12px; margin-top: 20px; text-align: center; }
+        .loading { text-align: center; padding: 50px; color: #888; }
+        .error { color: #ff4444; text-align: center; padding: 50px; }
+    </style>
+</head>
+<body>
+    <h1>🚀 POS SYSTEM MONITOR</h1>
+    
+    <!-- Loading indicator -->
+    <div id="loading" class="loading">Loading metrics...</div>
+    
+    <!-- Main content (hidden initially) -->
+    <div id="content" style="display: none;">
+        <!-- Server Stats Grid -->
+        <div class="grid">
+            <div class="metric">
+                <div class="label">Server Uptime</div>
+                <div class="value" id="uptime">-</div>
+            </div>
+            <div class="metric">
+                <div class="label">Active Requests</div>
+                <div class="value" id="activeRequests">-</div>
+            </div>
+            <div class="metric">
+                <div class="label">Avg Response Time</div>
+                <div class="value" id="avgResponse">-</div>
+            </div>
+        </div>
+
+        <!-- Resource Grid -->
+        <div class="grid">
+            <div class="metric">
+                <div class="label">Memory Usage</div>
+                <div class="value" id="memory">-</div>
+            </div>
+            <div class="metric">
+                <div class="label">Database Pool</div>
+                <div class="value" id="dbPool">-</div>
+            </div>
+            <div class="metric">
+                <div class="label">Total Requests</div>
+                <div class="value" id="totalRequests">-</div>
+            </div>
+        </div>
+
+        <!-- Performance Grid -->
+        <h2 style="color: #00ffff; margin: 20px 0 10px;">📊 Performance</h2>
+        <div class="grid">
+            <div class="metric">
+                <div class="label">P95 Response Time</div>
+                <div class="value" id="p95">-</div>
+            </div>
+            <div class="metric">
+                <div class="label">P99 Response Time</div>
+                <div class="value" id="p99">-</div>
+            </div>
+            <div class="metric">
+                <div class="label">Requests/Sec</div>
+                <div class="value" id="rps">-</div>
+            </div>
+        </div>
+
+        <!-- Status Codes -->
+        <h2 style="color: #00ffff; margin: 20px 0 10px;">📈 Status Codes</h2>
+        <div class="metric">
+            <div id="statusCodes">No data</div>
+        </div>
+
+        <!-- Recent Requests -->
+        <h2 style="color: #00ffff; margin: 20px 0 10px;">🔄 Recent Requests</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Method</th>
+                    <th>URL</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody id="requestBody">
+                <tr><td colspan="5">No requests yet</td></tr>
+            </tbody>
+        </table>
+
+        <!-- Timestamp -->
+        <div class="timestamp" id="timestamp"></div>
+    </div>
+
+    <script>
+        async function fetchMetrics() {
+            try {
+                // Show loading
+                document.getElementById('loading').style.display = 'block';
+                
+                const response = await fetch('/metrics');
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                const data = await response.json();
+                
+                // Hide loading, show content
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+                
+                // Update uptime
+                if (document.getElementById('uptime')) {
+                    const uptime = data.server.uptime;
+                    const days = Math.floor(uptime / 86400);
+                    const hours = Math.floor((uptime % 86400) / 3600);
+                    const minutes = Math.floor((uptime % 3600) / 60);
+                    document.getElementById('uptime').textContent = `${days}d ${hours}h ${minutes}m`;
+                }
+                
+                // Update other fields
+                if (document.getElementById('activeRequests')) {
+                    document.getElementById('activeRequests').textContent = data.server.activeRequests || 0;
+                }
+                
+                if (document.getElementById('avgResponse')) {
+                    document.getElementById('avgResponse').textContent = (data.performance?.averageResponseTime || 0) + 'ms';
+                }
+                
+                if (document.getElementById('memory')) {
+                    document.getElementById('memory').textContent = data.server.memory?.heapUsed || '0MB';
+                }
+                
+                if (document.getElementById('dbPool')) {
+                    const pool = data.database || {};
+                    document.getElementById('dbPool').textContent = `${pool.active || 0}/${pool.total || 0}`;
+                }
+                
+                if (document.getElementById('totalRequests')) {
+                    document.getElementById('totalRequests').textContent = data.server.totalRequests || 0;
+                }
+                
+                if (document.getElementById('p95')) {
+                    document.getElementById('p95').textContent = (data.performance?.p95 || 0) + 'ms';
+                }
+                
+                if (document.getElementById('p99')) {
+                    document.getElementById('p99').textContent = (data.performance?.p99 || 0) + 'ms';
+                }
+                
+                if (document.getElementById('rps')) {
+                    document.getElementById('rps').textContent = data.performance?.requestsPerSecond || '0';
+                }
+                
+                // Status codes
+                if (document.getElementById('statusCodes')) {
+                    let statusHtml = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px;">';
+                    if (data.statusCodes && Object.keys(data.statusCodes).length > 0) {
+                        for (const [code, count] of Object.entries(data.statusCodes)) {
+                            const color = code.startsWith('2') ? 'good' : code.startsWith('4') ? 'warn' : 'bad';
+                            statusHtml += `<div><span class="${color}">${code}</span>: ${count}</div>`;
+                        }
+                    } else {
+                        statusHtml += '<div>No status codes yet</div>';
+                    }
+                    statusHtml += '</div>';
+                    document.getElementById('statusCodes').innerHTML = statusHtml;
+                }
+                
+                // Recent requests
+                if (document.getElementById('requestBody')) {
+                    if (data.recentRequests && data.recentRequests.length > 0) {
+                        let rows = '';
+                        data.recentRequests.slice().reverse().forEach(req => {
+                            const time = new Date(req.time).toLocaleTimeString();
+                            const statusClass = req.status < 300 ? 'good' : req.status < 400 ? 'warn' : 'bad';
+                            rows += `<tr>
+                                <td>${time}</td>
+                                <td>${req.method}</td>
+                                <td>${req.url.substring(0, 30)}${req.url.length > 30 ? '...' : ''}</td>
+                                <td class="${statusClass}">${req.status}</td>
+                                <td>${req.duration}ms</td>
+                            </tr>`;
+                        });
+                        document.getElementById('requestBody').innerHTML = rows;
+                    } else {
+                        document.getElementById('requestBody').innerHTML = '<tr><td colspan="5">No requests yet</td></tr>';
+                    }
+                }
+                
+                // Timestamp
+                if (document.getElementById('timestamp')) {
+                    document.getElementById('timestamp').textContent = `Last updated: ${new Date().toLocaleString()}`;
+                }
+                
+            } catch (error) {
+                console.error('Fetch error:', error);
+                document.getElementById('loading').innerHTML = `
+                    <div class="error">
+                        ❌ Error: ${error.message}<br>
+                        Make sure server is running
+                    </div>
+                `;
+            }
+        }
+        
+        // Check if all elements exist before starting
+        setTimeout(() => {
+            fetchMetrics();
+            setInterval(fetchMetrics, 10000); // Every 10 seconds
+        }, 1000);
+    </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 18.0.0",
-     "appVersionSource": "local"
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -10,14 +10,23 @@
     },
     "preview": {
       "android": {
-        "buildType": "apk",
-        "usesCleartextTraffic": true
+        "buildType": "apk"
       },
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "NODE_ENV": "production",
+        "API_URL": "http://hawkerfinalv-production.up.railway.app/api",
+        "EXPO_PUBLIC_API_URL": "http://hawkerfinalv-production.up.railway.app/api"
+      }
     },
     "production": {
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "NODE_ENV": "production",
+        "API_URL": "http://hawkerfinalv-production.up.railway.app/api",
+        "EXPO_PUBLIC_API_URL": "http://hawkerfinalv-production.up.railway.app/api"
       }
     }
   },

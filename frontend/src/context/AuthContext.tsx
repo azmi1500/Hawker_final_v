@@ -62,14 +62,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
 // src/context/AuthContext.tsx
 
-// frontend/src/context/AuthContext.tsx
-
-// frontend/src/context/AuthContext.tsx
-
 const login = async (username: string, password: string): Promise<boolean> => {
   try {
-    console.log('📝 Attempting login with:', username);
-    
     const response = await API.post('/auth/login', {
       username,
       password
@@ -78,10 +72,6 @@ const login = async (username: string, password: string): Promise<boolean> => {
     console.log('✅ Login response:', response.data);
     
     if (!response.data) return false;
-    if (!response.data.token) {
-      console.log('❌ No token in response');
-      return false;
-    }
 
     const userData = {
       ...response.data.user,
@@ -89,56 +79,40 @@ const login = async (username: string, password: string): Promise<boolean> => {
       shopName: response.data.user?.shopName
     };
 
-    // ✅ CRITICAL: Save token and verify immediately
-    console.log('💾 Saving token to AsyncStorage...');
     await AsyncStorage.setItem('token', response.data.token);
-    
-    // ✅ Verify token was saved
-    const savedToken = await AsyncStorage.getItem('token');
-    console.log('✅ Token saved:', savedToken ? 'Success' : 'Failed');
-    console.log('📝 Saved token preview:', savedToken?.substring(0, 20) + '...');
-    
-    if (!savedToken) {
-      console.log('❌ Token not saved! AsyncStorage issue?');
-      return false;
-    }
-    
-    // ✅ Save user data
     await AsyncStorage.setItem('user', JSON.stringify(userData));
     
-    // ✅ Set user state
     setUser(userData);
-    
-    // ✅ Test immediate API call
-    try {
-      const testResponse = await API.get('/license/status');
-      console.log('✅ Test API call after login:', testResponse.data);
-    } catch (testError) {
-      console.log('❌ Test API call failed:', testError);
-    }
-    
     return true;
     
   } catch (error: any) {
-    console.log('❌ Login error:', {
-      message: error.message,
-      status: error.response?.status,
-      data: error.response?.data
-    });
     
+    
+    // ✅ Different messages for different cases
     if (error.response?.data?.code === 'ACCOUNT_BLOCKED') {
-      Alert.alert('Account Blocked', 'Your account has been blocked by administrator.');
+      Alert.alert(
+        'Account Blocked',
+        'Your account has been blocked by administrator. Please contact your admin.'
+      );
     } 
     else if (error.response?.data?.code === 'LICENSE_EXPIRED') {
-      Alert.alert('License Expired', 'Your license has expired.');
+      Alert.alert(
+        'License Expired',
+        'Your license has expired. Please contact your administrator.'
+      );
     }
     else {
-      Alert.alert('Login Failed', 'Invalid username or password');
+      // Invalid credentials
+      Alert.alert(
+        'Login Failed',
+        'Invalid username or password'
+      );
     }
     
     return false;
   }
 };
+
   const logout = async () => {
     try {
       await AsyncStorage.removeItem('user');

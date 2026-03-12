@@ -6,23 +6,35 @@ import { Platform, Alert } from 'react-native';  // ✅ Add Alert
 
 // We'll use this to navigate
 let navigateToLogin = null;
-
+let lastLoggedUrl = '';
+let lastLoggedTime = 0;
 export const setNavigationCallback = (callback) => {
   navigateToLogin = callback;
 };
 
 const getBaseURL = () => {
   if (__DEV__) {
-    // ✅ Development - use Railway itself (since it's hosted!)
-   return 'https://hawkerfinalv-production.up.railway.app/api';
-
+    return 'http://192.168.0.169:5000/api';
   } else {
-    // Production - same URL
-   return 'https://hawkerfinalv-production.up.railway.app/apii';
-
+    // Production URL
+    return 'https://hawkerfinalv-production.up.railway.app/api';
   }
 };
-
+// Before login, test connection
+const testAPI = async () => {
+  try {
+    const url = process.env.EXPO_PUBLIC_API_URL || 'https://hawkerfinalv-production.up.railway.app/api';
+    console.log('🔍 Testing API URL:', url);
+    
+    const response = await fetch(`${url}/test`);
+    const data = await response.json();
+    console.log('✅ API Test Success:', data);
+    return true;
+  } catch (error) {
+    console.log('❌ API Test Failed:', error.message);
+    return false;
+  }
+};
 const BASE_URL = getBaseURL();
 console.log('📱 Platform:', Platform.OS);
 console.log('🌐 API Base URL:', BASE_URL);
@@ -30,51 +42,58 @@ console.log('🚀 Environment:', __DEV__ ? 'Development' : 'Production');
 
 const API = axios.create({
   baseURL: BASE_URL,
-  timeout: 5000,
+  timeout: 180000, // Increase to 60 seconds
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'Connection': 'keep-alive'  // Add keep-alive
+  }
 });
-
-// Add token to every request
-// frontend/src/api.ts
-
-// frontend/src/api.ts
-
-API.interceptors.request.use(
-  async (config) => {
-    // ✅ Get token from storage
-    const token = await AsyncStorage.getItem('token');
-    
-    // ✅ Detailed logging
-    console.log('🔑 Interceptor triggered for:', config.url);
-    console.log('🔑 Token in storage:', token ? 'Yes' : 'No');
-    
-    if (token) {
-      // ✅ Log token preview
-      console.log('📝 Token preview:', token.substring(0, 20) + '...');
-      console.log('📝 Token length:', token.length);
-      
-      // ✅ Set authorization header
-      config.headers.Authorization = `Bearer ${token}`;
-      console.log('✅ Authorization header set');
-    } else {
-      console.log('❌ No token found for request');
+API.interceptors.response.use(
+  response => response,
+  async error => {
+    // If timeout, retry once
+    if (error.code === 'ECONNABORTED' && !error.config._retry) {
+      error.config._retry = true;
+      console.log('🔄 Retrying...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return API(error.config);
     }
-    
-    console.log('➡️ Request:', config.method.toUpperCase(), config.url);
-    console.log('📤 Headers:', JSON.stringify(config.headers, null, 2));
-    
-    return config;
-  },
-  (error) => {
-    console.log('❌ Request interceptor error:', error);
     return Promise.reject(error);
   }
 );
+// Add token to every request
+API.interceptors.request.use(
+  async (config) => {
+    const token = await AsyncStorage.getItem('token');
+    console.log('🔑 Token found:', token ? 'Yes' : 'No');
+    
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    
+    // Add timestamp to track duration
+    config.metadata = { startTime: Date.now() };
+    
+    console.log('➡️ Request:', config.method.toUpperCase(), config.url);
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+
 // Handle response errors
 API.interceptors.response.use(
-  (response) => {
+   (response) => {
+    const duration = Date.now() - (response.config?.metadata?.startTime || 0);
+    console.log(`✅ Response: ${response.config.url} (${duration}ms)`);
     return response;
   },
-  async (error) => {
+   async (error) => {
+    const duration = Date.now() - (error.config?.metadata?.startTime || 0);
+    console.log(`❌ Error after ${duration}ms:`, error.message);
     // Technical log (only you see)
     console.log('🔴 API Error:', {
       url: error.config?.url,

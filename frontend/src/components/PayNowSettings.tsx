@@ -17,7 +17,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import API, { uploadAPI } from '../api';
-
+import axios from 'axios';  // ✅ ADD THIS
+import AsyncStorage from '@react-native-async-storage/async-storage';
 interface PayNowSettingsProps {
   visible: boolean;
   onClose: () => void;
@@ -104,20 +105,34 @@ const uploadImage = async (uri: string) => {
       type,
     } as any);
 
-    console.log('📡 Sending to:', `${uploadAPI.defaults.baseURL}/upload`);
+    // ✅ FIX: Use full URL with /api prefix
+    const baseURL = __DEV__ 
+      ? 'http://192.168.1.4:5000/api' 
+      : 'https://hawkerfinalv-production.up.railway.app/api';
+      
+    console.log('📡 Environment:', __DEV__ ? 'Development' : 'Production');
+    console.log('📡 Sending to:', `${baseURL}/upload`);
 
-    const response = await uploadAPI.post('/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+    // Create a fresh axios instance for this upload
+    const response = await axios.post(`${baseURL}/upload`, formData, {
+      headers: { 
+        'Content-Type': 'multipart/form-data',
+        'Authorization': `Bearer ${await AsyncStorage.getItem('token')}`
+      },
       timeout: 30000,
     });
 
     console.log('✅ Upload response:', response.data);
 
-    // ✅ FIX: Use the URL from response directly
     const imageUrl = response.data.imageUrl || response.data.imageUri;
     
-    console.log('✅ Image URL set:', imageUrl);
-    setQrCodeUrl(imageUrl);
+    // ✅ FIX: Ensure full URL for production
+    const fullImageUrl = imageUrl.startsWith('http') 
+      ? imageUrl 
+      : `${baseURL.replace('/api', '')}${imageUrl}`;
+    
+    console.log('✅ Image URL set:', fullImageUrl);
+    setQrCodeUrl(fullImageUrl);
     
     Alert.alert('✅ Success', 'QR code uploaded successfully');
 
@@ -125,16 +140,29 @@ const uploadImage = async (uri: string) => {
     console.log('❌ Upload error:', {
       message: error.message,
       response: error.response?.data,
-      status: error.response?.status
+      status: error.response?.status,
+      config: {
+        url: error.config?.url,
+        method: error.config?.method,
+        baseURL: error.config?.baseURL
+      }
     });
 
-    Alert.alert(
-      '❌ Error',
-      error.response?.data?.error || 'Failed to upload image'
-    );
+    // Better error messages
+    let errorMsg = 'Failed to upload image';
+    if (error.code === 'ECONNABORTED') {
+      errorMsg = 'Upload timeout - please try again';
+    } else if (error.message === 'Network Error') {
+      errorMsg = 'Network error - check your connection';
+    } else if (error.response?.status === 404) {
+      errorMsg = 'Upload endpoint not found - check URL';
+    } else if (error.response?.data?.error) {
+      errorMsg = error.response.data.error;
+    }
+    
+    Alert.alert('❌ Error', errorMsg);
   }
 };
-
 const savePayNowSettings = async () => {
   if (enablePayNow && !qrCodeUrl) {
     Alert.alert('Error', 'Please upload PayNow QR code first');
@@ -248,13 +276,31 @@ const savePayNowSettings = async () => {
                      
 {qrCodeUrl ? (
   <View style={styles.qrPreviewContainer}>
-    <Image 
-      source={{ uri: qrCodeUrl.startsWith('http') 
+    {(() => {
+      const imageUrl = qrCodeUrl.startsWith('http') 
         ? qrCodeUrl 
-        : `https://hawkerfinal-production.up.railway.app${qrCodeUrl}`
-      }} 
-      style={styles.qrPreview} 
-    />
+        : `https://hawkerfinalv-production.up.railway.app${qrCodeUrl}`;
+      
+      console.log('🎯 Final image URL:', imageUrl);
+      
+      return (
+        <Image 
+          source={{ uri: imageUrl }}
+          style={styles.qrPreview}
+          onLoad={() => console.log('✅ Loaded:', imageUrl)}
+          onError={(e) => {
+            console.log('❌ Failed:', imageUrl, e.nativeEvent.error);
+            // Try without baseURL as fallback
+            if (!qrCodeUrl.startsWith('http')) {
+              setTimeout(() => {
+                setQrCodeUrl(qrCodeUrl); // This will retry
+              }, 1000);
+            }
+          }}
+        />
+      );
+    })()}
+    
     <TouchableOpacity
       style={styles.removeImageButton}
       onPress={() => setQrCodeUrl('')}

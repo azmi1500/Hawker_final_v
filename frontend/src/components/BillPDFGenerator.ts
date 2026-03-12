@@ -19,41 +19,32 @@ interface CompanySettings {
 
 class BillPDFGenerator {
   
- // frontend/src/components/BillPDFGenerator.ts
-
-static async loadSettings(userId?: string | number): Promise<CompanySettings> {
-  try {
-    if (!userId) return this.getDefaultSettings();
-    
-    // ✅ ADD RACE CONDITION - 3 SECONDS MAX!
-    const settingsPromise = API.get(`/company-settings/${userId}`);
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Settings timeout')), 3000)
-    );
-    
-    const response = await Promise.race([settingsPromise, timeoutPromise]) as any;
-    
-    if (response.data && response.data.success) {
-      const settings = response.data.settings;
-      return {
-        name: settings.CompanyName || '',
-        address: settings.Address || '',
-        gstNo: settings.GSTNo || '',
-        gstPercentage: settings.GSTPercentage || 9,
-        phone: settings.Phone || '',
-        email: settings.Email || '',
-        cashierName: settings.CashierName || '',
-        currency: settings.Currency || 'SGD',
-        currencySymbol: settings.CurrencySymbol || '$',
-      };
+  static async loadSettings(userId?: string | number): Promise<CompanySettings> {
+    try {
+      if (!userId) return this.getDefaultSettings();
+      
+      const response = await API.get(`/company-settings/${userId}`);
+      
+      if (response.data && response.data.success) {
+        const settings = response.data.settings;
+        return {
+          name: settings.CompanyName || '',
+          address: settings.Address || '',
+          gstNo: settings.GSTNo || '',
+          gstPercentage: settings.GSTPercentage || 9,
+          phone: settings.Phone || '',
+          email: settings.Email || '',
+          cashierName: settings.CashierName || '',
+          currency: settings.Currency || 'SGD',
+          currencySymbol: settings.CurrencySymbol || '$',
+        };
+      }
+      return this.getDefaultSettings();
+    } catch (error) {
+      return this.getDefaultSettings();
     }
-    return this.getDefaultSettings();
-    
-  } catch (error) {
-    console.log('⚠️ Settings load failed, using defaults');
-    return this.getDefaultSettings();
   }
-}
+
   private static getDefaultSettings(): CompanySettings {
     return {
       name: '',

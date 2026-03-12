@@ -33,6 +33,8 @@ interface MenuGridProps {
   t: any;
   theme: any;
   formatPrice: (amount: number) => string;
+     activeCategory: string;  // ✅ ADD THIS
+  categories: string[];  
 }
 
 // Type guard to check if item is placeholder
@@ -53,7 +55,9 @@ export const MenuGrid: React.FC<MenuGridProps> = ({
   menuUpdateTrigger, 
   t, 
   theme,
-  formatPrice
+  formatPrice,
+  categories,        // ✅ Now available
+  activeCategory     
 }) => {
   
   const itemsPerPage = 8;
@@ -62,7 +66,47 @@ export const MenuGrid: React.FC<MenuGridProps> = ({
   const [refreshKey, setRefreshKey] = useState(0);
   const [appState, setAppState] = useState(AppState.currentState);
   const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
+  const renderItemImage = (item: any) => {
+  const [imageError, setImageError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   
+  if (!item.imageUri) {
+    return (
+      <View style={[styles.menuItemImagePlaceholder, { backgroundColor: theme.surface }]}>
+        <Text style={styles.menuItemImagePlaceholderText}>🍽️</Text>
+      </View>
+    );
+  }
+
+  // Add timestamp to bypass cache
+  const imageUrl = item.imageUri.includes('?') 
+    ? `${item.imageUri}&t=${Date.now()}`
+    : `${item.imageUri}?t=${Date.now()}`;
+
+  return (
+    <Image 
+      key={`img-${item.id}-${retryCount}`}
+      source={{ uri: imageUrl }}
+      style={styles.menuItemImage}
+      resizeMode="cover"
+      onLoad={() => {
+        console.log(`✅ Loaded: ${item.name}`);
+        setImageError(false);
+      }}
+      onError={(e) => {
+        console.log(`❌ Failed: ${item.name}`, e.nativeEvent.error);
+        setImageError(true);
+        
+        // Retry with HTTP after 2 seconds
+        if (retryCount < 3) {
+          setTimeout(() => {
+            setRetryCount(prev => prev + 1);
+          }, 2000);
+        }
+      }}
+    />
+  );
+};
   // Refs for queue management
   const loadingQueue = useRef<string[]>([]);
   const isProcessing = useRef(false);
@@ -70,36 +114,47 @@ export const MenuGrid: React.FC<MenuGridProps> = ({
 
   // Process image loading queue (only 2 at a time)
   const processImageQueue = async () => {
-    if (isProcessing.current || loadingQueue.current.length === 0) return;
-    
-    isProcessing.current = true;
-    
-    // Load 2 images at a time
-    const batch = loadingQueue.current.splice(0, 2);
-    
-    await Promise.all(
-      batch.map(async (uri) => {
+  if (isProcessing.current || loadingQueue.current.length === 0) return;
+  
+  isProcessing.current = true;
+  
+  // Load 2 images at a time
+  const batch = loadingQueue.current.splice(0, 2);
+  
+  await Promise.all(
+    batch.map(async (uri) => {
+      try {
+        // Skip if already loaded
+        if (loadedImages.has(uri)) return;
+        
+        // Try HTTPS first
+        await Image.prefetch(uri);
+        setLoadedImages(prev => new Set(prev).add(uri));
+        console.log(`✅ Image loaded: ${uri.substring(0, 30)}...`);
+      } catch (error) {
+        console.log(`❌ HTTPS failed: ${uri.substring(0, 30)}...`);
+        
+        // Try HTTP as fallback
         try {
-          // Skip if already loaded or failed
-          if (loadedImages.has(uri) || failedImages.current.has(uri)) return;
-          
-          await Image.prefetch(uri);
-          setLoadedImages(prev => new Set(prev).add(uri));
-          console.log(`✅ Image loaded: ${uri.substring(0, 30)}...`);
-        } catch (error) {
-          console.log(`❌ Image failed: ${uri.substring(0, 30)}...`);
-          failedImages.current.add(uri);
+          const httpUri = uri.replace('https://', 'http://');
+          await Image.prefetch(httpUri);
+          setLoadedImages(prev => new Set(prev).add(uri)); // Still store HTTPS URL
+          console.log(`✅ HTTP fallback worked: ${uri.substring(0, 30)}...`);
+        } catch (httpError) {
+          console.log(`❌ Both failed: ${uri.substring(0, 30)}...`);
+          // Don't add to failedImages permanently - will retry later
         }
-      })
-    );
-    
-    isProcessing.current = false;
-    
-    // Process next batch if any
-    if (loadingQueue.current.length > 0) {
-      setTimeout(processImageQueue, 100);
-    }
-  };
+      }
+    })
+  );
+  
+  isProcessing.current = false;
+  
+  // Process next batch if any
+  if (loadingQueue.current.length > 0) {
+    setTimeout(processImageQueue, 100);
+  }
+};
 
   // Listen to AppState changes
   useEffect(() => {
@@ -138,16 +193,16 @@ export const MenuGrid: React.FC<MenuGridProps> = ({
   }, [currentPage]);
 
   // Active items calculation
-  const activeItems = useMemo(() => {
-    return categoryItems.filter(item => 
-      item.isActive === undefined || item.isActive === true
-    );
-  }, [categoryItems, allMenuItems, refreshKey]);
-
+const activeItems = useMemo(() => {
+  // ✅ Filter out inactive items!
+  return categoryItems.filter(item => 
+    item.isActive === true  // Only show active items
+  );
+}, [categoryItems]);
   // Calculate REAL total pages
-  const realTotalPages = useMemo(() => {
-    return Math.max(1, Math.ceil(activeItems.length / itemsPerPage));
-  }, [activeItems.length, itemsPerPage]);
+ const realTotalPages = useMemo(() => {
+  return Math.max(1, Math.ceil(activeItems.length / itemsPerPage));
+}, [activeItems.length, itemsPerPage]);
 
   // Auto-fix current page
   useEffect(() => {
@@ -157,21 +212,26 @@ export const MenuGrid: React.FC<MenuGridProps> = ({
   }, [activeItems.length, currentPage, realTotalPages]);
 
   // Sort alphabetically
-  const sortedItems = useMemo(() => {
-    return [...activeItems].sort((a, b) => {
-      const nameA = a.name?.toLowerCase() || '';
-      const nameB = b.name?.toLowerCase() || '';
-      return nameA.localeCompare(nameB);
-    });
-  }, [activeItems]);
+const sortedItems = useMemo(() => {
+  // Just return activeItems without sorting alphabetically
+  // The order comes from your backend DisplayOrder
+  return activeItems;
+}, [activeItems]);
 
   // Get current page items
-  const displayItems = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    return sortedItems.slice(startIndex, endIndex);
-  }, [sortedItems, currentPage, itemsPerPage]);
+ const displayItems = useMemo(() => {
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  return activeItems.slice(startIndex, endIndex);
+}, [activeItems, currentPage, itemsPerPage]);
 
+useEffect(() => {
+  console.log('🎯 MenuGrid received items:', activeItems.map(i => i.name));
+}, [activeItems]);
+useEffect(() => {
+  console.log('📋 MenuGrid received items for', activeCategory, ':', 
+    activeItems.map(i => i.name));
+}, [activeItems]);
   // Queue images for loading
   useEffect(() => {
     // Add new images to queue
@@ -242,25 +302,33 @@ export const MenuGrid: React.FC<MenuGridProps> = ({
                 onPress={() => addToCart(item)}
               >
                 <View style={[styles.menuItemImageContainer, { backgroundColor: theme.surface }]}>
-                  {item.imageUri && loadedImages.has(item.imageUri) ? (
-                    <Image 
-                      source={{ uri: item.imageUri }} 
-                      style={styles.menuItemImage}
-                      onError={(e) => {
-                        console.log('Image load error:', e.nativeEvent.error);
-                        failedImages.current.add(item.imageUri!);
-                      }}
-                    />
-                  ) : item.imageUri ? (
-                    <View style={[styles.menuItemImagePlaceholder, { backgroundColor: theme.surface }]}>
-                      <Text style={styles.menuItemImagePlaceholderText}>⏳</Text>
-                      <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Loading...</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.menuItemImagePlaceholder}>
-                      <Text style={styles.menuItemImagePlaceholderText}>🍽️</Text>
-                    </View>
-                  )}
+                 {item.imageUri && loadedImages.has(item.imageUri) ? (
+  <Image 
+    source={{ 
+      uri: item.imageUri.replace('https://', 'http://')  // 👈 TRY HTTP
+    }} 
+    style={styles.menuItemImage}
+    onLoad={() => console.log(`✅ Loaded: ${item.name}`)}
+    onError={(e) => {
+      console.log(`❌ HTTPS failed for ${item.name}, trying HTTPS again...`);
+      // If HTTP fails, try HTTPS with timestamp
+      const httpsUrl = item.imageUri + '?t=' + Date.now();
+      // Force reload
+      setTimeout(() => {
+        setRefreshKey(prev => prev + 1);
+      }, 1000);
+    }}
+  />
+) : item.imageUri ? (
+  <View style={[styles.menuItemImagePlaceholder, { backgroundColor: theme.surface }]}>
+    <Text style={styles.menuItemImagePlaceholderText}>⏳</Text>
+  </View>
+) : (
+  <View style={styles.menuItemImagePlaceholder}>
+    <Text style={styles.menuItemImagePlaceholderText}>🍽️</Text>
+  </View>
+)}
+
                 </View>
                 <Text style={[styles.menuItemName, { color: theme.text }]} numberOfLines={2}>
                   {item.name}

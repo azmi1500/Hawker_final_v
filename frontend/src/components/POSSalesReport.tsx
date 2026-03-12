@@ -43,7 +43,13 @@ const POSSalesReport: React.FC<Props> = ({
   const prevStartRef = useRef(startDate);
   const prevEndRef = useRef(endDate);
   const loadTimerRef = useRef<NodeJS.Timeout | null>(null);
-
+  // ✅ Define filterMap HERE (inside component)
+  const filterMap = {
+    'Today': 'today',
+    'Week': 'week',
+    'Month': 'month', 
+    'Custom': 'custom'
+  };
   // ============ STATE ============
   const [showPicker, setShowPicker] = useState(false);
   const [pickerType, setPickerType] = useState<'start' | 'end'>('start');
@@ -253,12 +259,17 @@ const POSSalesReport: React.FC<Props> = ({
   }, [visible, selectedFilter, startDate, endDate, activeTab]);
 
   // ============ HANDLERS ============
-  const handleFilterChange = (filter: string) => {
-    if (filter === selectedFilter) return;
-    console.log('🎯 Filter changing to:', filter);
-    onFilterChange(filter);
+ const handleFilterChange = (filter: string) => {
+  const filterMap: {[key: string]: string} = {
+    'Today': 'today',
+    'Week': 'week',
+    'Month': 'month',
+    'Custom': 'custom'
   };
-
+  
+  const backendFilter = filterMap[filter] || filter.toLowerCase();
+  onFilterChange(backendFilter);
+};
   const openStartPicker = useCallback(() => {
     setPickerType('start');
     setTempDate(startDate);
@@ -281,7 +292,8 @@ const POSSalesReport: React.FC<Props> = ({
     }
     setShowPicker(false);
   }, [pickerType, onStartDateChange, onEndDateChange]);
-
+const [isFilterChanging, setIsFilterChanging] = useState(false);
+const clickTimerRef = useRef<NodeJS.Timeout | null>(null);
   const groupTransactionsBySale = (transactions: any[]) => {
     const grouped: { [key: string]: any } = {};
     
@@ -356,28 +368,28 @@ const POSSalesReport: React.FC<Props> = ({
           </View>
 
           {/* Filter Section */}
-          <View style={styles.filterContainer}>
-            {['today', 'Week', 'Month', 'Custom'].map(filter => (
-              <TouchableOpacity
-                key={filter}
-                style={[
-                  styles.filterBtn,
-                  { 
-                    backgroundColor: selectedFilter === filter ? theme.primary : theme.surface,
-                    borderColor: theme.border 
-                  }
-                ]}
-                onPress={() => handleFilterChange(filter)}
-              >
-                <Text style={[
-                  styles.filterBtnText,
-                  { color: selectedFilter === filter ? '#fff' : theme.text }
-                ]}>
-                  {t[filter] || filter}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+        <View style={styles.filterContainer}>
+  {['Today', 'Week', 'Month', 'Custom'].map(filter => (  // 👈 All with capital first letter
+    <TouchableOpacity
+      key={filter}
+      style={[
+        styles.filterBtn,
+        { 
+          backgroundColor: selectedFilter === filterMap[filter] ? theme.primary : theme.surface,
+          borderColor: theme.border 
+        }
+      ]}
+      onPress={() => handleFilterChange(filter)}
+    >
+      <Text style={[
+        styles.filterBtnText,
+        { color: selectedFilter === filterMap[filter] ? '#fff' : theme.text }
+      ]}>
+        {filter}  
+      </Text>
+    </TouchableOpacity>
+  ))}
+</View>
 
           {/* Custom Date Picker */}
           {(selectedFilter === 'custom' || selectedFilter === 'Custom') && (
@@ -918,7 +930,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   summaryValueHighlight: {
-    fontSize: 20,
+    fontSize: 14,
     fontWeight: '700',
     color: '#ffffff',
   },

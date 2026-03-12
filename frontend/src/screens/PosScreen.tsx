@@ -75,10 +75,14 @@ export default function PosScreen() {
   const insets = useSafeAreaInsets();
     useLicenseCheck();
   const { user, logout } = useAuth();
+  const isOwner = user?.role === 'owner';
+const isStaff = user?.role === 'staff';
+
 const [showUPISettings, setShowUPISettings] = useState(false); 
   const validLanguage = savedLanguage && translations[savedLanguage] ? savedLanguage : 'en';
-  
-  
+  const [formActive, setFormActive] = useState(true);  // ✅ This is missing!
+const [loading, setLoading] = useState(false);   
+  const [menuRefreshKey, setMenuRefreshKey] = useState(0);
   const [theme, setTheme] = useState<string>(savedTheme || 'light');
   const [language, setLanguage] = useState<string>(validLanguage);
   const [prevLanguage, setPrevLanguage] = useState<string>('en');
@@ -88,50 +92,142 @@ const [showUPISettings, setShowUPISettings] = useState(false);
   const [showHomeMenu, setShowHomeMenu] = useState<boolean>(false);
  const [state, setState] = useState<any[]>([]); 
 const { currencySymbol } = useCurrency();
-const dataLoadedRef = useRef(false);
+const dataLoadedRef = useRef({
+  initial: false,
+  dishGroups: false,
+  dishItems: false,
+  paymentModes: false,
+  upiId: false,
+  payNow: false,
+  currency: false
+});
+
+const apiCallInProgress = useRef({
+  dishGroups: false,
+  dishItems: false,
+  paymentModes: false,
+  upiId: false,
+  payNow: false,
+  currency: false
+});
 const loadingRef = useRef(false);
 
 useEffect(() => {
   if (!user?.id) return;
   
-  // Prevent multiple simultaneous loads
-  if (loadingRef.current) return;
-  
   // Skip if already loaded
-  if (dataLoadedRef.current) {
-    console.log('⏭️ Data already loaded, skipping');
+  if (dataLoadedRef.current.initial) {
+    console.log('⏭️ Data already loaded, skipping...');
     return;
   }
   
-  const loadAllData = async () => {
-    loadingRef.current = true;
-    
+  const loadAllDataOnce = async () => {
     console.log('📦 Loading ALL data ONCE for user:', user.id);
     
+    const promises = [];
+    
+    // Dish Groups
+    if (!dataLoadedRef.current.dishGroups && !apiCallInProgress.current.dishGroups) {
+      apiCallInProgress.current.dishGroups = true;
+      promises.push(
+        loadDishGroups().then(() => {
+          dataLoadedRef.current.dishGroups = true;
+          apiCallInProgress.current.dishGroups = false;
+        })
+      );
+    }
+    
+    // Dish Items
+    if (!dataLoadedRef.current.dishItems && !apiCallInProgress.current.dishItems) {
+      apiCallInProgress.current.dishItems = true;
+      promises.push(
+        loadDishItems().then(() => {
+          dataLoadedRef.current.dishItems = true;
+          apiCallInProgress.current.dishItems = false;
+        })
+      );
+    }
+    
+    // Payment Modes
+    if (!dataLoadedRef.current.paymentModes && !apiCallInProgress.current.paymentModes) {
+      apiCallInProgress.current.paymentModes = true;
+      promises.push(
+        loadPaymentModes().then(() => {
+          dataLoadedRef.current.paymentModes = true;
+          apiCallInProgress.current.paymentModes = false;
+        })
+      );
+    }
+    
+    // UPI ID
+    if (!dataLoadedRef.current.upiId && !apiCallInProgress.current.upiId) {
+      apiCallInProgress.current.upiId = true;
+      promises.push(
+        loadUPIId().then(() => {
+          dataLoadedRef.current.upiId = true;
+          apiCallInProgress.current.upiId = false;
+        })
+      );
+    }
+    
+    // PayNow QR
+    if (!dataLoadedRef.current.payNow && !apiCallInProgress.current.payNow) {
+      apiCallInProgress.current.payNow = true;
+      promises.push(
+        loadPayNowQR().then(() => {
+          dataLoadedRef.current.payNow = true;
+          apiCallInProgress.current.payNow = false;
+        })
+      );
+    }
+    
+    // Currency
+    if (!dataLoadedRef.current.currency && !apiCallInProgress.current.currency) {
+      apiCallInProgress.current.currency = true;
+      promises.push(
+        refreshCurrency().then(() => {
+          dataLoadedRef.current.currency = true;
+          apiCallInProgress.current.currency = false;
+        })
+      );
+    }
+    
+    await Promise.all(promises);
+    dataLoadedRef.current.initial = true;
+    console.log('✅ All data loaded in parallel!');
+  };
+  
+  loadAllDataOnce();
+  
+}, [user?.id]); // Only depends on user.id
+// In PosScreen.tsx - Add with other useRef
+
+const settingsChecked = useRef(false);
+
+const settingsLoading = useRef(false);
+
+// ✅ Replace your existing checkLicense with this
+
+
+
+// ✅ Add this for company settings
+useEffect(() => {
+  if (!user?.id) return;
+  
+  const loadSettings = async () => {
+    if (settingsChecked.current || settingsLoading.current) return;
+    
+    settingsLoading.current = true;
     try {
-      // Load everything in parallel - ONCE!
-      await Promise.all([
-        loadDishGroups(),
-        loadDishItems(),
-        loadPaymentModes(),
-        loadUPIId(),
-        loadPayNowQR(),
-        refreshCurrency()
-      ]);
-      
-      dataLoadedRef.current = true;
-      console.log('✅ All data loaded successfully - NO DUPLICATES');
-      
-    } catch (error) {
-      console.log('❌ Error loading data:', error);
+      await refreshCurrency();
+      settingsChecked.current = true;
     } finally {
-      loadingRef.current = false;
+      settingsLoading.current = false;
     }
   };
   
-  loadAllData();
-  
-}, [user?.id]); 
+  loadSettings();
+}, [user?.id]);
 
   const [summary, setSummary] = useState({
   totalSales: 0,
@@ -466,6 +562,7 @@ const onDateChange = (event: any, selectedDate?: Date) => {
   const [showEditDish, setShowEditDish] = useState<boolean>(false);
   const [editingDish, setEditingDish] = useState<any>(null);
   const [menuCurrentPage, setMenuCurrentPage] = useState(1);
+  const [menuKey, setMenuKey] = useState(0);
   const [newDish, setNewDish] = useState<any>({
     name: '',
     price: '',
@@ -526,16 +623,18 @@ useEffect(() => {
 const loadingGroups = useRef(false);
 const groupsLoaded = useRef(false);
 
+// In PosScreen.tsx - Update loadDishGroups
+
 const loadDishGroups = async (force = false) => {
-  // 🛑 CRITICAL: If already loaded and not forcing, skip
+  // 🛑 Skip if already loaded
   if (groupsLoaded.current && !force) {
-    console.log('⏭️ Dish groups already loaded PERMANENTLY, skipping');
+    console.log('⏭️ Dish groups already loaded, skipping');
     return;
   }
   
-  // 🛑 CRITICAL: If already loading, skip
+  // 🛑 Skip if loading
   if (loadingGroups.current) {
-    console.log('⏳ Dish groups already loading, skipping duplicate');
+    console.log('⏳ Dish groups already loading, skipping');
     return;
   }
 
@@ -546,35 +645,45 @@ const loadDishGroups = async (force = false) => {
     const response = await API.get('/dishgroups');
     console.log('📦 Raw dishGroups response:', response.data);
     
-    const groups = response.data.map((group: any) => ({
+    // ✅ Map groups with ALL fields including DisplayOrder
+    let groups = response.data.map((group: any) => ({
       id: group.Id,
       name: group.Name,
       itemCount: group.ItemCount,
-      active: group.active
+      active: group.active,
+      DisplayOrder: group.DisplayOrder ?? group.order ?? 999 // Use DisplayOrder from backend
     }));
     
-    console.log('📋 Processed dishGroups:', groups);
+    // ✅ Sort by DisplayOrder (from backend)
+    groups.sort((a, b) => {
+      const orderA = a.DisplayOrder ?? 999;
+      const orderB = b.DisplayOrder ?? 999;
+      return orderA - orderB;
+    });
     
-    // ✅ Mark as loaded BEFORE setting state
-    groupsLoaded.current = true;
+    console.log('📋 Final order (by DisplayOrder):', groups.map(g => g.name));
+    
+    // ✅ Save to AsyncStorage for backup (optional)
+    const orderArray = groups.map(g => g.id);
+    await AsyncStorage.setItem('dishGroupOrder', JSON.stringify(orderArray));
+    
     setDishGroups(groups);
     
-    // Only show active categories in POS
+    // ✅ Update categories with same order
     const activeGroups = groups.filter(g => g.active !== false);
     const activeGroupNames = activeGroups.map(g => g.name);
     setCategories(activeGroupNames);
-    
-    console.log('✅ Active categories:', activeGroupNames);
+    console.log('✅ Active categories (ordered):', activeGroupNames);
     
     if (activeGroupNames.length > 0 && !activeGroupNames.includes(activeCategory)) {
       setActiveCategory(activeGroupNames[0]);
     }
     
-  } catch (error: any) {
-    // Reset on error so we can try again
+    groupsLoaded.current = true;
+    
+  } catch (error) {
+    console.log('❌ Error loading dish groups:', error);
     groupsLoaded.current = false;
-    const errorMessage = error.userMessage || 'Failed to load menu. Please try again.';
-    Alert.alert('Error', errorMessage);
   } finally {
     loadingGroups.current = false;
   }
@@ -620,7 +729,7 @@ const loadDishItems = async (force = false) => {
     const response = await API.get('/dishitems');
     console.log('Raw items response:', response.data);
     
-    const baseURL = 'https://hawkerfinal-production.up.railway.app';
+    const baseURL = 'https://hawkerfinalv-production.up.railway.app';
     
     const items = (response.data || []).map((item: any) => ({
       id: item.Id || item.id,
@@ -638,46 +747,82 @@ const loadDishItems = async (force = false) => {
       isActive: item.IsActive ?? true,
     }));
     
-    console.log('📊 Items with categories:', items.map(i => ({
-      name: i.name,
-      id: i.id,
-      categoryId: i.categoryId,
-      categoryName: i.categoryName,
-      displayCategory: i.displayCategory,
-      isActive: i.isActive
-    })));
+    console.log('📊 Items loaded:', items.length);
     
     // ✅ Mark as loaded BEFORE setting state
     itemsLoaded.current = true;
     setMenuItems(items);
     
-    // Update dish group counts based on actual items
-    const counts: Record<string, number> = {};
+    // ✅ OPTIMIZATION: Only update counts if items actually changed
+    const newCounts: Record<string, number> = {};
     items.forEach((item: any) => {
       const categoryId = item.categoryId;
       if (categoryId) {
-        counts[categoryId] = (counts[categoryId] || 0) + 1;
+        newCounts[categoryId] = (newCounts[categoryId] || 0) + 1;
       }
     });
     
-    console.log('📊 Category counts:', counts);
-    
-    // Update dishGroups with correct counts
-    setDishGroups(prev => prev.map(group => ({
-      ...group,
-      itemCount: counts[group.id?.toString()] || 0
-    })));
+    // Check if counts changed before updating
+    setDishGroups(prev => {
+      const needsUpdate = prev.some(group => 
+        group.itemCount !== (newCounts[group.id?.toString()] || 0)
+      );
+      
+      if (!needsUpdate) {
+        console.log('⏭️ Category counts unchanged, skipping update');
+        return prev;
+      }
+      
+      console.log('📊 Updating category counts:', newCounts);
+      return prev.map(group => ({
+        ...group,
+        itemCount: newCounts[group.id?.toString()] || 0
+      }));
+    });
     
   } catch (error: any) {
-    // Reset on error so we can try again
+    console.log('❌ Error loading items:', error);
     itemsLoaded.current = false;
-    const errorMessage = error.userMessage || 'Failed to load menu items. Please try again.';
+    
+    // Show user-friendly error
+    const errorMessage = error.response?.data?.error || 
+                        error.message || 
+                        'Failed to load menu items';
     Alert.alert('Error', errorMessage);
+    
   } finally {
     loadingItems.current = false;
   }
 };
+// Add this in PosScreen.tsx - inside your component, before return
 
+const onGroupUpdate = useCallback(async () => {
+  console.log('🔄 Group updated, reloading with order...');
+  
+  // ✅ Force reload with true parameter
+  await loadDishGroups(true);
+  await loadDishItems(true);
+  
+  // ✅ Force MenuGrid to re-render
+  setMenuRefreshKey(prev => prev + 1);
+  
+  // ✅ Log after state updates (use useEffect instead)
+  console.log('✅ Update complete - UI should refresh');
+  
+}, [loadDishGroups, loadDishItems]);
+
+// Add this useEffect to watch changes
+useEffect(() => {
+  if (dishGroups.length > 0) {
+    console.log('✅ New dishGroups order:', dishGroups.map(g => g.name));
+  }
+}, [dishGroups]);
+
+useEffect(() => {
+  if (categories.length > 0) {
+    console.log('✅ New categories order:', categories);
+  }
+}, [categories]);// Add dependencies
   // Helper function to get category ID
   // Helper function to get category ID
 const getCategoryIdByName = (categoryName: string): number => {
@@ -828,35 +973,7 @@ const getEnglishCategory = (categoryName: string): string => {
     });
     return () => subscription?.remove();
   }, []);
-useEffect(() => {
-    const checkLicense = async () => {
-        try {
-            const response = await API.get('/license/status');
-            const expiryDate = new Date(response.data.ExpiryDate);
-            
-            if (expiryDate < new Date()) {
-                Alert.alert(
-                    'License Expired',
-                    'Your license has expired. Please contact admin.',
-                    [
-                        { 
-                            text: 'OK', 
-                            onPress: () => logout() 
-                        }
-                    ]
-                );
-            }
-        } catch (error) {
-           
-        }
-    };
-    
-    checkLicense();
-    
-    // Check every minute
-    const interval = setInterval(checkLicense, 60 * 1000);
-    return () => clearInterval(interval);
-}, []);
+
   useEffect(() => {
     if (!categories.includes(activeCategory) && categories.length > 0) {
       setActiveCategory(categories[0]);
@@ -866,23 +983,21 @@ useEffect(() => {
 const categoryItems = useMemo(() => {
   if (!t || !activeCategory) return [];
   
-  // ✅ Filter based on displayCategory (translated)
-  let items = menuItems.filter(item => 
+  console.log(`🎯 Filtering items for category: ${activeCategory}`);
+  
+  // Filter items for current category - NO SORTING!
+  const items = menuItems.filter(item => 
     item.displayCategory === activeCategory
   );
   
-  // ✅ SORT ALPHABETICALLY (A to Z)
-  items = items.sort((a, b) => {
-    const nameA = a.name?.toLowerCase() || '';
-    const nameB = b.name?.toLowerCase() || '';
-    return nameA.localeCompare(nameB);
-  });
-  
-  console.log('📋 Sorted menu items for', activeCategory, ':', items.map(i => i.name));
+  console.log(`📦 Found ${items.length} items in original order`);
   
   return items;
 }, [activeCategory, menuItems, language]);
-
+useEffect(() => {
+  console.log('🎯 Active category:', activeCategory);
+  console.log('📦 Items order:', categoryItems.map(i => i.name));
+}, [activeCategory, categoryItems]);
   const totalPages = Math.ceil(categoryItems.length / itemsPerPage);
   
   const currentItems = useMemo(() => {
@@ -1393,14 +1508,17 @@ const loadSalesData = useCallback(async () => {
   try {
     let url = '/sales';
     
-    if (selectedSalesFilter === 'custom') {
-      // ✅ FIX: Create stable date strings
+    // ✅ Check case-insensitive
+    const isCustom = selectedSalesFilter?.toLowerCase() === 'custom';
+    
+    if (isCustom) {
       const start = startDate.toISOString().split('T')[0];
       const end = endDate.toISOString().split('T')[0];
       url += `?filter=custom&startDate=${start}&endDate=${end}`;
       console.log('📊 Loading custom sales:', start, 'to', end);
     } else {
-      url += `?filter=${selectedSalesFilter}`;
+      // ✅ Send lowercase to backend
+      url += `?filter=${selectedSalesFilter?.toLowerCase()}`;
     }
     
     const response = await API.get(url);
@@ -1416,9 +1534,9 @@ const loadSalesData = useCallback(async () => {
     
     setSalesHistory(formattedSales);
   } catch (error) {
-    
+    console.log('❌ Error loading sales:', error);
   }
-}, [selectedSalesFilter, startDate, endDate]); // ✅ Proper deps
+}, [selectedSalesFilter, startDate, endDate]);// ✅ Proper deps
 
 useEffect(() => {
   if (showSalesReport) {
@@ -1558,70 +1676,138 @@ useEffect(() => {
 }, [paymentOptions]);
   // Dish Group Functions
  const handleAddGroup = async (): Promise<void> => {
-  if (newGroupName.trim()) {
+  if (!newGroupName.trim()) {
+    Alert.alert(t.error, 'Please enter group name');
+    return;
+  }
+
+  setLoading(true);
+  try {
+    const response = await API.post('/dishgroups', {
+      name: newGroupName.trim(),
+      active: formActive
+    });
+    
+    console.log('✅ Add group response:', response.data);
+    
+    // ✅ Get the new group with DisplayOrder from backend
+    const newGroup = {
+      id: response.data.Id,
+      name: response.data.Name,
+      itemCount: 0,
+      active: response.data.active ?? formActive,
+      DisplayOrder: response.data.DisplayOrder ?? dishGroups.length // Use backend order or append
+    };
+    
+    // ✅ Add new group to the END of list
+    const updatedGroups = [...dishGroups, newGroup];
+    
+    // ✅ Sort by DisplayOrder (though new group should be at end)
+    updatedGroups.sort((a, b) => {
+      const orderA = a.DisplayOrder ?? 999;
+      const orderB = b.DisplayOrder ?? 999;
+      return orderA - orderB;
+    });
+    
+    setDishGroups(updatedGroups);
+    
+    // ✅ Update categories in same order
+    const updatedCategories = updatedGroups
+      .filter(g => g.active !== false)
+      .map(g => g.name);
+    setCategories(updatedCategories);
+    
+    setNewGroupName('');
+    setFormActive(true);
+    setShowAddGroup(false);
+    
+    // ✅ Save new order to backend (optional - backend already has order)
+    const orderData = updatedGroups.map((group, index) => ({
+      id: group.id,
+      order: index
+    }));
+    
     try {
-      const response = await API.post('/dishgroups', {
-        name: newGroupName,
-        active: true
-      });
-      
-      const newGroup = {
-        id: response.data.Id,
-        name: response.data.Name,
-        itemCount: 0,
-        active: response.data.active,
-      };
-      
-      // Update dish groups
-      const updatedGroups = [...dishGroups, newGroup];
-      setDishGroups(updatedGroups);
-      
-      // ✅ Update categories
-      const updatedCategories = [...categories, newGroupName];
-      setCategories(updatedCategories);
-      
-      setNewGroupName('');
-      setShowAddGroup(false);
-      
-      Alert.alert(t.success, `${newGroupName} ${t.addSuccess}`);
-    } catch (error) {
-     
-      Alert.alert(t.error, 'Failed to add dish group');
+      await API.post('/dishgroups/update-order', { groups: orderData });
+      console.log('✅ Order synced after add');
+    } catch (orderError) {
+      console.log('⚠️ Order sync failed:', orderError);
     }
+    
+    onGroupUpdate();
+    Alert.alert('✅ Success', `${newGroupName} added successfully`);
+    
+  } catch (error) {
+    console.log('❌ Add group error:', error);
+    Alert.alert(t.error, 'Failed to add dish group');
+  } finally {
+    setLoading(false);
   }
 };
 
-  const handleEditGroup = (): void => {
-    if (editingGroup && newGroupName.trim()) {
+  const handleEditGroup = async (): Promise<void> => {
+    if (!editingGroup || !newGroupName.trim()) return;
+
+    setLoading(true);
+    try {
+      const response = await API.put(`/dishgroups/${editingGroup.id}`, {
+        name: newGroupName.trim(),
+        active: formActive
+      });
+
       const oldName = editingGroup.name;
-      const updatedGroups = dishGroups.map(group => 
-        group.id === editingGroup.id 
-          ? {...group, name: newGroupName} 
+      
+      // Update groups
+      const updatedGroups = dishGroups.map(group =>
+        group.id === editingGroup.id
+          ? { ...group, name: newGroupName.trim(), active: formActive }
           : group
       );
-      
-      const updatedCategories = categories.map(cat => 
-        cat === oldName ? newGroupName : cat
-      );
-      
-      const updatedMenuItems = menuItems.map(item => 
-        item.category === oldName 
-          ? {...item, category: newGroupName} 
-          : item
-      );
-      
       setDishGroups(updatedGroups);
+
+      // Update categories (preserve order)
+      const updatedCategories = categories.map(cat =>
+        cat === oldName ? newGroupName.trim() : cat
+      );
       setCategories(updatedCategories);
+
+      // ✅ FIX: Update ALL dish items that belong to this category
+      const updatedMenuItems = menuItems.map(item => {
+        // Check if item belongs to this category
+        if (item.displayCategory === oldName || 
+            item.category === oldName || 
+            item.originalCategory === oldName) {
+          return {
+            ...item,
+            displayCategory: newGroupName.trim(),
+            category: newGroupName.trim(),
+            originalCategory: newGroupName.trim(),
+            categoryName: newGroupName.trim()
+          };
+        }
+        return item;
+      });
+      
       setMenuItems(updatedMenuItems);
-      
-      if (activeCategory === oldName) {
-        setActiveCategory(newGroupName);
+      console.log(`✅ Updated ${updatedMenuItems.length} items from "${oldName}" to "${newGroupName}"`);
+
+      // Update active category if needed
+      if (oldName === activeCategory) {
+        setActiveCategory(newGroupName.trim());
       }
-      
+
       setEditingGroup(null);
       setNewGroupName('');
+      setFormActive(true);
       setShowEditGroup(false);
-      Alert.alert(t.success, `${newGroupName} ${t.updateSuccess}`);
+      
+      onGroupUpdate();
+      
+    } catch (error: any) {
+      console.log('❌ Edit group error:', error);
+      Alert.alert(t.error || '❌ Error', 'Failed to edit dish group');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1911,7 +2097,7 @@ const testSunmiConnection = async () => {
 
   // Render Functions
   const renderDishGroupManagement = () => (
-  <DishGroupManagement
+<DishGroupManagement
     dishGroups={dishGroups}
     setDishGroups={setDishGroups}
     categories={categories}
@@ -1919,11 +2105,8 @@ const testSunmiConnection = async () => {
     setActiveCategory={setActiveCategory}
     currentTheme={currentTheme}
     t={t}
-    onGroupUpdate={() => {
-      loadDishGroups();
-      loadDishItems();
-    }}
-  />
+    onGroupUpdate={onGroupUpdate}  // ✅ Use the function reference
+/>
 );
 
 
@@ -2443,8 +2626,7 @@ const renderCashModal = () => (
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.categoriesScrollContent}
         >
-          {categories.sort((a, b) => a.localeCompare(b)) 
-          .map(cat => (
+           {categories.map(cat => ( 
             <TouchableOpacity 
               key={cat} 
               onPress={() => handleCategoryChange(cat)}
@@ -2468,24 +2650,32 @@ const renderCashModal = () => (
 
       {/* Main Content */}
       <View style={styles.mainContent}>
-        <View style={[styles.menuSection, isMobile && styles.menuSectionMobile, { backgroundColor: currentTheme.background }]}>
-         <MenuGrid 
-  currentItems={currentItems}     // Current page items (already sliced)
-  addToCart={addToCart}
-  totalPages={totalPages}         // Total pages from parent
-  currentPage={currentPage}
-  prevPage={prevPage}
-  nextPage={nextPage}
-  setCurrentPage={setCurrentPage}
-  categoryItems={categoryItems}
-  allMenuItems={menuItems}   // All items in category
-  menuUpdateTrigger={menuUpdateTrigger}  
-  t={t}
-  theme={currentTheme}
-  formatPrice={formatPrice} 
-/>
-        </View>
-
+  {/* Menu Section - Takes full width for owner, 70% for staff */}
+  <View style={[
+    styles.menuSection, 
+    isMobile && styles.menuSectionMobile,
+    isOwner && { flex: 1, width: '100%' } // ✅ Owner takes full width
+  ]}>
+    <MenuGrid 
+      key={menuRefreshKey}
+      currentItems={currentItems}
+      addToCart={addToCart}
+      totalPages={totalPages}
+      currentPage={currentPage}
+      prevPage={prevPage}
+      nextPage={nextPage}
+      setCurrentPage={setCurrentPage}
+      categoryItems={categoryItems}
+      allMenuItems={menuItems}
+      menuUpdateTrigger={menuUpdateTrigger}  
+      t={t}
+      theme={currentTheme}
+      formatPrice={formatPrice} 
+      activeCategory={activeCategory}
+      categories={categories}
+    />
+  </View>
+         {!isOwner && (
         <View style={[styles.cartSection, isMobile && styles.cartSectionMobile, { backgroundColor: currentTheme.surface, borderLeftColor: currentTheme.border }]}>
           <CartSection 
             cart={cart}
@@ -2501,6 +2691,7 @@ const renderCashModal = () => (
             formatPrice={formatPrice} 
           />
         </View>
+        )}
       </View>
 
       {/* Side Menu Modal */}

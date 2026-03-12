@@ -1,26 +1,55 @@
-// backend/routes/companySettingsRoutes.js - UPDATED with Currency
-
+// backend/routes/companySettingsRoutes.js - UPDATED with Owner-Staff Support
 const express = require('express');
 const router = express.Router();
 const { getPool, sql } = require('../config/db');
 const { authenticateToken } = require('../middleware/auth');
 
-// GET company settings for a user
+// ============================================
+// HELPER FUNCTION - Get effective user ID (owner for staff)
+// ============================================
+const getEffectiveUserId = async (userId, userRole) => {
+    // If user is staff, get their owner's ID
+    if (userRole === 'staff') {
+        const pool = getPool();
+        const result = await pool.request()
+            .input('userId', sql.Int, userId)
+            .query('SELECT OwnerId FROM Users WHERE Id = @userId');
+        
+        if (result.recordset.length > 0 && result.recordset[0].OwnerId) {
+            console.log(`👤 Staff ${userId} using owner ${result.recordset[0].OwnerId} for company settings`);
+            return result.recordset[0].OwnerId;
+        }
+    }
+    // Owner or admin uses their own ID
+    return userId;
+};
+
+// ============================================
+// GET company settings
+// ============================================
 router.get('/:userId', authenticateToken, async (req, res) => {
     try {
         const { userId } = req.params;
         const loggedInUserId = req.user.id;
+        const userRole = req.user.role;
         
-        // Security check
-        if (parseInt(userId) !== loggedInUserId && req.user.role !== 'admin') {
+        // Get effective user ID (if staff, use owner)
+        const effectiveUserId = await getEffectiveUserId(parseInt(userId), userRole);
+        
+        // Security check - allow if:
+        // 1. User is accessing their own data (or owner's data for staff)
+        // 2. User is admin
+        if (parseInt(userId) !== loggedInUserId && 
+            effectiveUserId !== loggedInUserId && 
+            userRole !== 'admin') {
             return res.status(403).json({ error: 'Access denied' });
         }
         
         const pool = getPool();
         
-        // ✅ Use a single query with LEFT JOIN to get both in one go
+        // ✅ Use effectiveUserId for query
         const result = await pool.request()
-            .input('userId', sql.Int, userId)
+            .input('userId', sql.Int, effectiveUserId)
             .query(`
                 SELECT 
                     u.ShopName,
@@ -44,7 +73,6 @@ router.get('/:userId', authenticateToken, async (req, res) => {
         
         const row = result.recordset[0];
         
-        // ✅ If no settings exist, return defaults
         const settings = {
             CompanyName: row.CompanyName,
             Address: row.Address,
@@ -57,6 +85,7 @@ router.get('/:userId', authenticateToken, async (req, res) => {
             CurrencySymbol: row.CurrencySymbol
         };
         
+        console.log(`✅ ${userRole} ${loggedInUserId} fetched settings for user ${effectiveUserId}`);
         res.json({
             success: true,
             settings,
@@ -69,14 +98,22 @@ router.get('/:userId', authenticateToken, async (req, res) => {
     }
 });
 
+// ============================================
 // POST (create/update) company settings
+// ============================================
 router.post('/:userId', authenticateToken, async (req, res) => {
     try {
         const { userId } = req.params;
         const loggedInUserId = req.user.id;
+        const userRole = req.user.role;
+        
+        // Get effective user ID (if staff, update owner's settings)
+        const effectiveUserId = await getEffectiveUserId(parseInt(userId), userRole);
         
         // Security check
-        if (parseInt(userId) !== loggedInUserId && req.user.role !== 'admin') {
+        if (parseInt(userId) !== loggedInUserId && 
+            effectiveUserId !== loggedInUserId && 
+            userRole !== 'admin') {
             return res.status(403).json({ error: 'Access denied' });
         }
         
@@ -94,9 +131,9 @@ router.post('/:userId', authenticateToken, async (req, res) => {
         
         const pool = getPool();
         
-        // ✅ SINGLE QUERY using MERGE (insert or update in one go)
+        // ✅ Save under effectiveUserId (owner's ID for staff)
         await pool.request()
-            .input('userId', sql.Int, userId)
+            .input('userId', sql.Int, effectiveUserId)
             .input('companyName', sql.NVarChar, CompanyName || '')
             .input('address', sql.NVarChar, Address || '')
             .input('gstNo', sql.NVarChar, GSTNo || '')
@@ -126,6 +163,7 @@ router.post('/:userId', authenticateToken, async (req, res) => {
                     VALUES (@userId, @companyName, @address, @gstNo, @gstPercentage, @phone, @email, @cashierName, @currency, @currencySymbol);
             `);
         
+        console.log(`✅ ${userRole} ${loggedInUserId} saved settings for user ${effectiveUserId}`);
         res.json({ 
             success: true, 
             message: 'Company settings saved successfully' 

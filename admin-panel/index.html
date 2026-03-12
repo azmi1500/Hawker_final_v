@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1056,46 +1057,58 @@ body.light-mode .password-toggle:hover {
             </div>
 
             <!-- Create License -->
-            <div class="glass-card create-card">
-                <div class="section-title">
-                    <i class="fas fa-plus-circle"></i>
-                    <span>Create New Shop License</span>
-                </div>
+            <!-- Create License - Updated with Owner Fields -->
+<div class="glass-card create-card">
+    <div class="section-title">
+        <i class="fas fa-plus-circle"></i>
+        <span>Create New Shop License</span>
+    </div>
 
-                <div class="form-grid">
-                    <div class="input-group">
-                        <i class="fas fa-store"></i>
-                        <input type="text" id="shopName" placeholder="Shop Name">
-                    </div>
-                    <div class="input-group">
-                        <i class="fas fa-user"></i>
-                        <input type="text" id="username" placeholder="Username">
-                    </div>
-                    <div class="input-group">
-                        <i class="fas fa-lock"></i>
-                        <input type="password" id="password" placeholder="Password">
-                    </div>
-                   
-                </div>
+    <div class="form-grid">
+        <!-- Shop Name -->
+        <div class="input-group">
+            <i class="fas fa-store"></i>
+            <input type="text" id="shopName" placeholder="Shop Name">
+        </div>
+        
+        <!-- OWNER FIELDS (NEW) -->
+        <div class="input-group">
+            <i class="fas fa-user-crown"></i>  <!-- Crown icon for owner -->
+            <input type="text" id="ownerUsername" placeholder="Owner Username">
+        </div>
+        <div class="input-group">
+            <i class="fas fa-lock"></i>
+            <input type="password" id="ownerPassword" placeholder="Owner Password">
+        </div>
+        
+        <!-- STAFF FIELDS -->
+        <div class="input-group">
+            <i class="fas fa-user"></i>
+            <input type="text" id="staffUsername" placeholder="Staff Username">
+        </div>
+        <div class="input-group">
+            <i class="fas fa-lock"></i>
+            <input type="password" id="staffPassword" placeholder="Staff Password">
+        </div>
+    </div>
 
-                <div class="datetime-range">
-                    <div class="datetime-input">
-                        <label><i class="far fa-calendar-alt"></i> Start Date & Time</label>
-                        <input type="text" id="startDateTime" placeholder="Select start">
-                    </div>
-                    <div class="datetime-input">
-                        <label><i class="far fa-calendar-check"></i> End Date & Time</label>
-                        <input type="text" id="endDateTime" placeholder="Select end">
-                    </div>
-                </div>
+    <!-- Date fields (same) -->
+    <div class="datetime-range">
+        <div class="datetime-input">
+            <label><i class="far fa-calendar-alt"></i> Start Date & Time</label>
+            <input type="text" id="startDateTime" placeholder="Select start">
+        </div>
+        <div class="datetime-input">
+            <label><i class="far fa-calendar-check"></i> End Date & Time</label>
+            <input type="text" id="endDateTime" placeholder="Select end">
+        </div>
+    </div>
 
-               
-
-                <button class="create-btn" onclick="createLicense()">
-                    <i class="fas fa-magic"></i>
-                    Generate License
-                </button>
-            </div>
+    <button class="create-btn" onclick="createLicense()">
+        <i class="fas fa-magic"></i>
+        Generate License (Owner + Staff)
+    </button>
+</div>
 
             <!-- Shops Table -->
             <div class="glass-card table-card">
@@ -1156,7 +1169,7 @@ body.light-mode .password-toggle:hover {
 
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script>
-        const API_URL = 'https://hawkerfinal-production.up.railway.app';
+        const API_URL = 'http://192.168.0.169:5000/api';
         let adminToken = '';
         let startPicker, endPicker, renewStartPicker, renewEndPicker;
 
@@ -1262,6 +1275,8 @@ body.light-mode .password-toggle:hover {
         // Load shops
         // Update loadShops function with toggle and delete buttons
 
+// In your admin panel HTML, update the loadShops function
+
 async function loadShops() {
     try {
         const res = await fetch(`${API_URL}/admin/shops?t=${Date.now()}`, {
@@ -1270,24 +1285,72 @@ async function loadShops() {
         const shops = await res.json();
         
         let html = '<table id="shopsTable"><thead><tr>';
-        html += '<th>Shop</th><th>Username</th><th>License Key</th><th>Start</th><th>Expiry</th><th>License Status</th><th>Time Left</th><th>User Status</th><th>Actions</th>';
+        html += '<th>Shop</th><th>Role</th><th>Username</th><th>License Key</th><th>Start</th><th>Expiry</th><th>License Status</th><th>Time Left</th><th>User Status</th><th>Actions</th>';
         html += '</tr></thead><tbody>';
         
+        let currentShop = '';
+        let shopOwners = {};
+        
+        // First pass: collect owner license info
         shops.forEach(shop => {
-            const startDate = formatDate(shop.StartDate);
-            const expiryDate = formatDate(shop.ExpiryDate);
-            const timeLeft = calculateTimeLeft(shop.ExpiryDate);
+            if (shop.Role === 'owner') {
+                shopOwners[shop.ShopName] = {
+                    licenseKey: shop.LicenseKey,
+                    startDate: shop.StartDate,
+                    expiryDate: shop.ExpiryDate,
+                    licenseActive: shop.LicenseActive
+                };
+            }
+        });
+        
+        shops.forEach(shop => {
+            // Add shop separator if new shop
+            if (currentShop !== shop.ShopName) {
+                if (currentShop !== '') {
+                    html += `<tr style="height: 5px;"><td colspan="10" style="padding: 0;"></td></tr>`;
+                }
+                html += `<tr style="background: rgba(76, 130, 250, 0.2);">
+                    <td colspan="10" style="padding: 12px; font-weight: 700; color: #4A90E2;">
+                        <i class="fas fa-store"></i> ${shop.ShopName || 'Unnamed Shop'}
+                    </td>
+                </tr>`;
+                currentShop = shop.ShopName;
+            }
             
-            // ✅ User Status - from Users table
+            // Get owner license info for this shop
+            const ownerInfo = shopOwners[shop.ShopName] || {};
+            
+            // ✅ FIX: For staff, use owner's start date
+            const displayStartDate = (shop.Role === 'staff' && ownerInfo.startDate) 
+                ? ownerInfo.startDate 
+                : shop.StartDate;
+            
+            const displayExpiryDate = (shop.Role === 'staff' && ownerInfo.expiryDate) 
+                ? ownerInfo.expiryDate 
+                : shop.ExpiryDate;
+            
+            const displayLicenseKey = (shop.Role === 'staff' && ownerInfo.licenseKey) 
+                ? ownerInfo.licenseKey 
+                : shop.LicenseKey;
+            
+            const startDate = formatDate(displayStartDate);
+            const expiryDate = formatDate(displayExpiryDate);
+            const timeLeft = calculateTimeLeft(displayExpiryDate);
+            
             const isUserActive = shop.UserActive === 1 || shop.UserActive === true;
             
-            // ✅ License Status - from Licenses table
-            const isLicenseActive = shop.LicenseActive === 1 || shop.LicenseActive === true;
+            const roleIcon = shop.Role === 'owner' ? '👑' : '👤';
+            const roleDisplay = shop.Role === 'owner' ? 'Owner' : 'Staff';
+            
+            const licenseDisplay = displayLicenseKey || 'No License';
             
             let licenseStatusClass = '';
             let licenseStatusText = 'Unknown';
             
-            if (timeLeft.text === 'Expired') {
+            if (licenseDisplay === 'No License') {
+                licenseStatusClass = 'status-expired';
+                licenseStatusText = 'No License';
+            } else if (timeLeft.text === 'Expired') {
                 licenseStatusClass = 'status-expired';
                 licenseStatusText = 'Expired';
             } else if (timeLeft.class === 'status-warning') {
@@ -1300,38 +1363,32 @@ async function loadShops() {
             
             html += `<tr>
                 <td><strong>${shop.ShopName || '-'}</strong></td>
+                <td>${roleIcon} ${roleDisplay}</td>
                 <td>${shop.Username}</td>
-                <td><span class="license-key">${shop.LicenseKey || 'N/A'}</span></td>
-                <td>${startDate}</td>
+                <td><span class="license-key">${licenseDisplay}</span></td>
+                <td>${startDate}</td>  <!-- ✅ Now start date will show! -->
                 <td>${expiryDate}</td>
                 <td><span class="status-badge ${licenseStatusClass}">${licenseStatusText}</span></td>
                 <td><span class="status-badge ${timeLeft.class}">${timeLeft.text}</span></td>
+                <td><span class="status-badge ${isUserActive ? 'status-active' : 'status-expired'}">${isUserActive ? 'Active' : 'Inactive'}</span></td>
                 <td>
-                    <span class="status-badge ${isUserActive ? 'status-active' : 'status-expired'}">
-                        ${isUserActive ? 'Active' : 'Inactive'}
-                    </span>
-                </td>
-                <td>
-                   <div style="display: flex; gap: 8px;">
-                        <!-- Toggle User Status -->
+                   <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                         <button class="action-btn ${isUserActive ? 'warning' : 'success'}" 
-                                onclick="toggleUserStatus(${shop.Id}, ${!isUserActive})"
-                                title="${isUserActive ? 'Deactivate User' : 'Activate User'}">
+                                onclick="toggleUserStatus(${shop.Id}, ${!isUserActive})">
                             <i class="fas ${isUserActive ? 'fa-ban' : 'fa-check'}"></i>
                             ${isUserActive ? 'Deactivate' : 'Activate'}
                         </button>
                         
-                        <!-- Renew License -->
-                        <button class="renew-btn ${!isLicenseActive ? 'expired' : ''}" 
-                                onclick="showRenewModal(${shop.Id})"
-                                title="Renew License">
-                            <i class="fas fa-sync-alt"></i> Renew
-                        </button>
+                        ${shop.Role === 'owner' ? `
+                            <button class="renew-btn" onclick="showRenewModal(${shop.Id})">
+                                <i class="fas fa-sync-alt"></i> Renew
+                            </button>
+                        ` : `
+                            <span style="opacity: 0.5; padding: 8px 12px;">Staff</span>
+                        `}
                         
-                        <!-- Delete Button -->
                         <button class="action-btn danger" 
-                                onclick="deleteUser(${shop.Id}, '${shop.ShopName}')"
-                                title="Delete User">
+                                onclick="deleteUser(${shop.Id}, '${shop.ShopName}')">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -1344,7 +1401,8 @@ async function loadShops() {
         updateStats(shops);
         
     } catch (error) {
-        document.getElementById('shopsList').innerHTML = '<div style="text-align: center; padding: 60px; color: #ff4646;"><i class="fas fa-exclamation-triangle fa-3x"></i><p style="margin-top: 20px;">Error loading shops</p></div>';
+        console.error('❌ Error:', error);
+        document.getElementById('shopsList').innerHTML = '<div class="error">Error loading shops</div>';
     }
 }
 // Toggle user active status
@@ -1439,47 +1497,88 @@ async function deleteUser(userId, shopName) {
         }
 
         // Create license
-        async function createLicense() {
-            try {
-                const startDateTime = document.getElementById('startDateTime').value;
-                const endDateTime = document.getElementById('endDateTime').value;
-                
-                if (!startDateTime || !endDateTime) {
-                    alert('Please select start and end dates');
-                    return;
-                }
-                
-                const res = await fetch(`${API_URL}/admin/create-shop`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${adminToken}`
-                    },
-                    body: JSON.stringify({
-                        shopName: document.getElementById('shopName').value,
-                        username: document.getElementById('username').value,
-                        password: document.getElementById('password').value,
-                        startDate: startDateTime,
-                        endDate: endDateTime
-                    })
-                });
-                
-                const data = await res.json();
-                if (res.ok) {
-                    alert(`✅ License created successfully!`);
-                    loadShops();
-                    
-                    // Clear form
-                    document.getElementById('shopName').value = '';
-                    document.getElementById('username').value = '';
-                    document.getElementById('password').value = '';
-                } else {
-                    alert('Error: ' + data.error);
-                }
-            } catch (error) {
-                alert('Creation failed: ' + error.message);
+async function createLicense() {
+    try {
+        const startDateTime = document.getElementById('startDateTime').value;
+        const endDateTime = document.getElementById('endDateTime').value;
+        
+        if (!startDateTime || !endDateTime) {
+            alert('Please select start and end dates');
+            return;
+        }
+
+        // Get all form values
+        const shopName = document.getElementById('shopName').value;
+        const ownerUsername = document.getElementById('ownerUsername').value;
+        const ownerPassword = document.getElementById('ownerPassword').value;
+        const staffUsername = document.getElementById('staffUsername').value;
+        const staffPassword = document.getElementById('staffPassword').value;
+
+        // Validate all fields
+        if (!shopName || !ownerUsername || !ownerPassword || !staffUsername || !staffPassword) {
+            alert('Please fill in all fields (Shop Name, Owner details, and Staff details)');
+            return;
+        }
+
+        console.log('📤 Sending:', {  // Debug log
+            shopName,
+            ownerUsername,
+            staffUsername,
+            startDate: startDateTime,
+            endDate: endDateTime
+        });
+        
+               const res = await fetch(`${API_URL}/admin/create-shop`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${adminToken}`
+            },
+            body: JSON.stringify({
+                shopName: shopName,
+                ownerUsername: ownerUsername,
+                ownerPassword: ownerPassword,
+                staffUsername: staffUsername,
+                staffPassword: staffPassword,
+                startDate: startDateTime,
+                endDate: endDateTime
+            })
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok) {
+            alert(`✅ License created successfully!\n\nOwner: ${data.shop.owner.username}\nStaff: ${data.shop.staff.username}`);
+            loadShops();
+            clearForm();
+        } else {
+            // Show specific error message
+            if (data.error && data.error.includes('already exists')) {
+                alert('❌ ' + data.error + '\n\nPlease choose a different username.');
+            } else {
+                alert('❌ Error: ' + (data.error || 'Unknown error'));
             }
         }
+    } catch (error) {
+        console.error('❌ Creation error:', error);
+        alert('Creation failed: ' + error.message);
+    }
+}
+function clearForm() {
+    document.getElementById('shopName').value = '';
+    document.getElementById('ownerUsername').value = '';
+    document.getElementById('ownerPassword').value = '';
+    document.getElementById('staffUsername').value = '';
+    document.getElementById('staffPassword').value = '';
+    
+    // Reset date pickers if needed
+    if (startPicker) {
+        startPicker.setDate(new Date());
+    }
+    if (endPicker) {
+        endPicker.setDate(new Date(new Date().getTime() + 30*24*60*60*1000));
+    }
+}
 // Toggle password visibility
 function togglePassword() {
     const passwordInput = document.getElementById('adminPass');

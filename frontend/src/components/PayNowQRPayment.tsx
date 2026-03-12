@@ -62,7 +62,7 @@ const getFullImageUrl = (url: string) => {
   if (url.startsWith('http')) {
     return url;
   }
-  return `https://hawkerfinal-production.up.railway.app${url}`;
+  return `https://hawkerfinalv-production.up.railway.app${url}`;
 };
   return (
     <Modal visible={visible} transparent animationType="slide">

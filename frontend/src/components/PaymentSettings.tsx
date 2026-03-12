@@ -1,5 +1,4 @@
-// frontend/src/components/PaymentSettings.tsx - FIXED VERSION
-
+// components/PaymentSettings.tsx
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -19,7 +18,7 @@ interface PaymentSettingsProps {
   visible: boolean;
   onClose: () => void;
   userId: number;
-  theme: any;
+  theme: any;  // Theme will be passed from parent
   t: any;
   onUpdate: (newUpiId: string) => void;
 }
@@ -36,6 +35,7 @@ const PaymentSettings: React.FC<PaymentSettingsProps> = ({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Load current UPI ID
   useEffect(() => {
     if (visible && userId) {
       loadUpiId();
@@ -48,7 +48,7 @@ const PaymentSettings: React.FC<PaymentSettingsProps> = ({
       const response = await API.get(`/user/upi/${userId}`);
       setUpiId(response.data.upiId || '');
     } catch (error) {
-      console.log('Error loading UPI:', error);
+      
     } finally {
       setLoading(false);
     }
@@ -77,7 +77,7 @@ const PaymentSettings: React.FC<PaymentSettingsProps> = ({
       onClose();
     } catch (error) {
       Alert.alert('Error', 'Failed to update UPI ID');
-      console.log('Save error:', error);
+     
     } finally {
       setSaving(false);
     }
@@ -122,6 +122,7 @@ const PaymentSettings: React.FC<PaymentSettingsProps> = ({
       onRequestClose={onClose}
     >
       <View style={styles.modalOverlay}>
+        {/* ✅ Use theme for modal content background */}
         <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
           
           {/* Header */}
@@ -138,14 +139,12 @@ const PaymentSettings: React.FC<PaymentSettingsProps> = ({
             </View>
           ) : (
             <ScrollView>
-              {/* ✅ FIXED: Properly closed View */}
-              <View style={styles.section}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 15 }}>
-                  <Ionicons name="qr-code-outline" size={20} color={theme.primary} />
-                  <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                    UPI Settings
-                  </Text>
-                </View>
+              {/* UPI Section */}
+             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+  <Ionicons name="qr-code-outline" size={20} color={theme.primary} />
+  <Text style={[styles.sectionTitle, { color: theme.text }]}>
+    UPI Settings
+  </Text>
 
                 <Text style={[styles.label, { color: theme.textSecondary }]}>
                   Your UPI ID
@@ -240,20 +239,22 @@ const PaymentSettings: React.FC<PaymentSettingsProps> = ({
   );
 };
 
+// ✅ Styles - Keep these independent of theme
 const styles = StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
+modalOverlay: {
+  flex: 1,
+  backgroundColor: 'rgba(0,0,0,0.5)',
+  justifyContent: 'center',
+  alignItems: 'center',
+  padding: 20,
+},
   modalContent: {
     width: '100%',
-    maxWidth: 400,  // ✅ Fixed: was 100 (too small!)
+    maxWidth: 100,
     borderRadius: 20,
     padding: 20,
     maxHeight: '80%',
+    
   },
   header: {
     flexDirection: 'row',
@@ -275,6 +276,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
+    marginBottom: 15,
   },
   label: {
     fontSize: 14,
